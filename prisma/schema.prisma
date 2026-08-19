@@ -1,0 +1,268 @@
+// CivicSense Database Schema
+// Prisma Schema Definition for PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum Role {
+  CITIZEN
+  OFFICER
+  ADMIN
+
+  @@map("role_enum")
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("verification_status_enum")
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("priority_enum")
+}
+
+enum ComplaintStatus {
+  NEW
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+
+  @@map("complaint_status_enum")
+}
+
+// -----------------------------------------------------------------------------
+// 1. Users Entity
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @db.VarChar(255)
+  email         String   @unique @db.VarChar(255)
+  phone         String?  @db.VarChar(50)
+  password_hash String   @db.VarChar(255) // Securely stored password hash (never plaintext)
+  role          Role     @default(CITIZEN)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  officer_profile     OfficerProfile?
+  complaints          Complaint[]              @relation("CitizenComplaints")
+  assigned_complaints ComplaintAssignment[]    @relation("AssignedByUser")
+  status_changes      ComplaintStatusHistory[] @relation("ChangedByUser")
+  notifications       Notification[]           @relation("UserNotifications")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+// 2. Departments Entity
+// -----------------------------------------------------------------------------
+
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean  @default(true)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  officers   OfficerProfile[]
+  offices    DepartmentOffice[]
+  complaints Complaint[]
+
+  @@map("departments")
+}
+
+// -----------------------------------------------------------------------------
+// 3. Officer Profiles Entity
+// -----------------------------------------------------------------------------
+
+model OfficerProfile {
+  id                  String             @id @default(uuid()) @db.Uuid
+  user_id             String             @unique @db.Uuid
+  department_id       String             @db.Uuid
+  designation         String             @db.VarChar(255)
+  verification_status VerificationStatus @default(PENDING)
+  created_at          DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime           @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  user        User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  department  Department            @relation(fields: [department_id], references: [id], onDelete: Restrict)
+  assignments ComplaintAssignment[]
+  resolutions Resolution[]
+
+  @@index([department_id])
+  @@index([verification_status])
+  @@map("officer_profiles")
+}
+
+// -----------------------------------------------------------------------------
+// 4. Department Offices Entity
+// -----------------------------------------------------------------------------
+
+model DepartmentOffice {
+  id            String   @id @default(uuid()) @db.Uuid
+  department_id String   @db.Uuid
+  name          String   @db.VarChar(255)
+  address       String   @db.Text
+  latitude      Float
+  longitude     Float
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  department Department  @relation(fields: [department_id], references: [id], onDelete: Cascade)
+  complaints Complaint[]
+
+  @@index([department_id])
+  @@map("department_offices")
+}
+
+// -----------------------------------------------------------------------------
+// 5. Complaints Entity
+// -----------------------------------------------------------------------------
+
+model Complaint {
+  id            String          @id @default(uuid()) @db.Uuid
+  citizen_id    String          @db.Uuid
+  department_id String          @db.Uuid
+  office_id     String?         @db.Uuid
+  title         String          @db.VarChar(255)
+  description   String          @db.Text
+  photo_url     String?         @db.Text
+  latitude      Float?
+  longitude     Float?
+  priority      Priority        @default(MEDIUM)
+  status        ComplaintStatus @default(NEW)
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime        @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  citizen        User                     @relation("CitizenComplaints", fields: [citizen_id], references: [id], onDelete: Restrict)
+  department     Department               @relation(fields: [department_id], references: [id], onDelete: Restrict)
+  office         DepartmentOffice?        @relation(fields: [office_id], references: [id], onDelete: SetNull)
+  assignments    ComplaintAssignment[]
+  status_history ComplaintStatusHistory[]
+  resolution     Resolution?
+  notifications  Notification[]
+
+  // Indexes as required
+  @@index([department_id])
+  @@index([citizen_id])
+  @@index([status])
+  @@index([created_at])
+  @@index([department_id, status])
+  @@map("complaints")
+}
+
+// -----------------------------------------------------------------------------
+// 6. Complaint Assignments Entity
+// -----------------------------------------------------------------------------
+
+model ComplaintAssignment {
+  id           String   @id @default(uuid()) @db.Uuid
+  complaint_id String   @db.Uuid
+  officer_id   String   @db.Uuid
+  assigned_by  String   @db.Uuid
+  assigned_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  complaint Complaint      @relation(fields: [complaint_id], references: [id], onDelete: Cascade)
+  officer   OfficerProfile @relation(fields: [officer_id], references: [id], onDelete: Restrict)
+  assigner  User           @relation("AssignedByUser", fields: [assigned_by], references: [id], onDelete: Restrict)
+
+  @@index([complaint_id])
+  @@index([officer_id])
+  @@index([assigned_by])
+  @@map("complaint_assignments")
+}
+
+// -----------------------------------------------------------------------------
+// 7. Complaint Status History Entity
+// -----------------------------------------------------------------------------
+
+model ComplaintStatusHistory {
+  id           String          @id @default(uuid()) @db.Uuid
+  complaint_id String          @db.Uuid
+  status       ComplaintStatus
+  changed_by   String          @db.Uuid
+  note         String?         @db.Text
+  created_at   DateTime        @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  complaint Complaint @relation(fields: [complaint_id], references: [id], onDelete: Cascade)
+  changer   User      @relation("ChangedByUser", fields: [changed_by], references: [id], onDelete: Restrict)
+
+  @@index([complaint_id])
+  @@index([created_at])
+  @@map("complaint_status_history")
+}
+
+// -----------------------------------------------------------------------------
+// 8. Resolutions Entity
+// -----------------------------------------------------------------------------
+
+model Resolution {
+  id           String   @id @default(uuid()) @db.Uuid
+  complaint_id String   @unique @db.Uuid
+  officer_id   String   @db.Uuid
+  photo_url    String?  @db.Text
+  note         String   @db.Text
+  resolved_at  DateTime @default(now()) @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  complaint Complaint      @relation(fields: [complaint_id], references: [id], onDelete: Cascade)
+  officer   OfficerProfile @relation(fields: [officer_id], references: [id], onDelete: Restrict)
+
+  @@index([complaint_id])
+  @@index([officer_id])
+  @@map("resolutions")
+}
+
+// -----------------------------------------------------------------------------
+// 9. Notifications Entity
+// -----------------------------------------------------------------------------
+
+model Notification {
+  id                String   @id @default(uuid()) @db.Uuid
+  recipient_user_id String   @db.Uuid
+  complaint_id      String?  @db.Uuid
+  title             String   @db.VarChar(255)
+  message           String   @db.Text
+  type              String   @db.VarChar(50)
+  is_read           Boolean  @default(false)
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  recipient User       @relation("UserNotifications", fields: [recipient_user_id], references: [id], onDelete: Cascade)
+  complaint Complaint? @relation(fields: [complaint_id], references: [id], onDelete: SetNull)
+
+  @@index([recipient_user_id])
+  @@index([is_read])
+  @@index([created_at])
+  @@map("notifications")
+}
