@@ -33,6 +33,17 @@ const parseCorsOrigin = (originValue?: string): string | string[] => {
 
 const nodeEnv = (process.env.NODE_ENV || 'development') as 'development' | 'production' | 'test';
 
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret && nodeEnv === 'production') {
+  throw new Error('JWT_SECRET environment variable is required in production');
+}
+
+const adminEmail = process.env.ADMIN_EMAIL;
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (nodeEnv === 'production' && (!adminEmail || !adminPassword)) {
+  throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required in production');
+}
+
 export const config: AppConfig = {
   nodeEnv,
   isProduction: nodeEnv === 'production',
@@ -44,10 +55,11 @@ export const config: AppConfig = {
   databaseUrl:
     process.env.DATABASE_URL ||
     'postgresql://postgres:postgres@localhost:5432/civicsense?schema=public',
-  jwtSecret: process.env.JWT_SECRET || 'civicsense_jwt_secure_dev_secret_key_2026_!@#987',
+  // Development/test fallback is intentionally non-production only.
+  jwtSecret: jwtSecret || 'civicsense_dev_only_jwt_secret_change_me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  adminEmail: process.env.ADMIN_EMAIL || 'demo.admin@civicsense.local',
-  adminPassword: process.env.ADMIN_PASSWORD || 'AdminSecure123!',
+  adminEmail: adminEmail || 'demo.admin@civicsense.local',
+  adminPassword: adminPassword || 'AdminSecure123!',
   rateLimit: {
     windowMinutes: parseInt(process.env.RATE_LIMIT_WINDOW_MINUTES || '15', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
