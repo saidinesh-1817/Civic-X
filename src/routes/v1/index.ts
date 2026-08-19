@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { authRouter } from '../../modules/auth/auth.route.js';
 import { healthRouter } from './health.route.js';
 
 export const v1Router = Router();
@@ -6,10 +7,12 @@ export const v1Router = Router();
 // Health Check Endpoint: /api/v1/health
 v1Router.use('/', healthRouter);
 
+// Authentication Module Endpoints: /api/v1/auth/*
+v1Router.use('/auth', authRouter);
+
 /**
- * Future Module Mount Points (Task B2+):
+ * Future Module Mount Points:
  *
- * import { authRouter } from '../../modules/auth/auth.route.js';
  * import { usersRouter } from '../../modules/users/users.route.js';
  * import { departmentsRouter } from '../../modules/departments/departments.route.js';
  * import { complaintsRouter } from '../../modules/complaints/complaints.route.js';
@@ -17,7 +20,6 @@ v1Router.use('/', healthRouter);
  * import { officersRouter } from '../../modules/officers/officers.route.js';
  * import { adminRouter } from '../../modules/administration/admin.route.js';
  *
- * v1Router.use('/auth', authRouter);
  * v1Router.use('/users', usersRouter);
  * v1Router.use('/departments', departmentsRouter);
  * v1Router.use('/complaints', complaintsRouter);

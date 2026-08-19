@@ -12,9 +12,14 @@ export interface AppConfig {
   apiPrefix: string;
   corsOrigin: string | string[];
   databaseUrl: string;
+  jwtSecret: string;
+  jwtExpiresIn: string;
+  adminEmail: string;
+  adminPassword: string;
   rateLimit: {
     windowMinutes: number;
     maxRequests: number;
+    authMaxRequests: number;
   };
 }
 
@@ -39,8 +44,13 @@ export const config: AppConfig = {
   databaseUrl:
     process.env.DATABASE_URL ||
     'postgresql://postgres:postgres@localhost:5432/civicsense?schema=public',
+  jwtSecret: process.env.JWT_SECRET || 'civicsense_jwt_secure_dev_secret_key_2026_!@#987',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  adminEmail: process.env.ADMIN_EMAIL || 'demo.admin@civicsense.local',
+  adminPassword: process.env.ADMIN_PASSWORD || 'AdminSecure123!',
   rateLimit: {
     windowMinutes: parseInt(process.env.RATE_LIMIT_WINDOW_MINUTES || '15', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+    authMaxRequests: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '30', 10),
   },
 };

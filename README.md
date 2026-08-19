@@ -1,12 +1,10 @@
 # CivicSense - Backend & Database Infrastructure
 
-CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation and relational database infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
+CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, and role-based authentication infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
 
 ---
 
 ## 🏗️ Project Architecture & Structure
-
-The codebase is organized modularly to enable clean separation of concerns:
 
 ```
 civicsense-backend/
@@ -15,8 +13,9 @@ civicsense-backend/
 ├── .gitignore                    # Git ignore file
 ├── package.json                  # Project dependencies & scripts
 ├── tsconfig.json                 # Strict TypeScript configuration
-├── test_endpoints.js             # HTTP API endpoint verification script
+├── test_endpoints.js             # HTTP API base endpoint verification script
 ├── test_database.ts              # Database schema & integrity verification suite
+├── test_auth.ts                  # B3 Authentication & RBAC verification test suite
 ├── README.md                     # Documentation
 ├── prisma/
 │   ├── schema.prisma             # PostgreSQL schema definition & models
@@ -26,15 +25,16 @@ civicsense-backend/
 │           └── migration.sql
 └── src/
     ├── server.ts                 # Server entrypoint with graceful shutdown & signal traps
-    ├── app.ts                    # Express application factory, security middlewares & routing
+    ├── app.ts                    # Express application factory & middleware pipeline
     ├── config/
     │   ├── env.config.ts         # Type-safe environment variable parsing & defaults
     │   ├── cors.config.ts        # CORS configuration for frontend applications
     │   └── database.ts           # Singleton Prisma Client & connection lifecycle
     ├── middlewares/
+    │   ├── auth.middleware.ts    # JWT authentication, RBAC, and auth rate limiting
     │   ├── error.middleware.ts   # Centralized 404 and global error handler
     │   ├── logging.middleware.ts # HTTP request logger (colored dev / structured prod)
-    │   ├── rateLimiter.middleware.ts # Security rate limiting middleware
+    │   ├── rateLimiter.middleware.ts # General security rate limiting middleware
     │   └── validate.middleware.ts # Zod-based request validation middleware
     ├── utils/
     │   ├── apiResponse.ts        # Standardized success/error JSON response utility
@@ -43,10 +43,14 @@ civicsense-backend/
     ├── routes/
     │   ├── index.ts              # Root /api aggregator
     │   └── v1/
-    │       ├── index.ts          # Versioned /api/v1 router
+    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /health, etc.)
     │       └── health.route.ts   # Health check route
-    └── modules/                  # Domain module placeholders for subsequent phases
-        ├── auth/                 # Future: Citizen & staff authentication / RBAC
+    └── modules/
+        ├── auth/                 # B3: Authentication & Role-Based Access Control (RBAC)
+        │   ├── auth.controller.ts# Auth HTTP handlers
+        │   ├── auth.service.ts   # Auth business logic, token issuing & verification
+        │   ├── auth.schema.ts    # Zod input validation schemas
+        │   └── auth.route.ts     # /api/v1/auth router definitions
         ├── users/                # Future: Citizen profiles & preferences
         ├── departments/          # Future: Civic departments & SLAs
         ├── complaints/           # Future: Issue reporting, tracking & resolution workflows
@@ -57,170 +61,148 @@ civicsense-backend/
 
 ---
 
-## 🗄️ Database Architecture (B2: Database Foundation)
+## 🔐 Authentication & RBAC (B3: Backend Authentication)
 
-### Database Technology
-- **Database Engine**: PostgreSQL (14+)
-- **ORM & Migrations**: Prisma ORM (`@prisma/client`, `prisma`)
-- **Primary Keys**: UUID v4 (`@id @default(uuid()) @db.Uuid`)
-- **Security**: Passwords securely hashed with `bcryptjs` (never stored in plaintext)
+### 1. Authentication Method
+- **Standard**: Stateless **JWT (JSON Web Tokens)** with Bearer authentication (`Authorization: Bearer <token>`).
+- **Password Security**: Salted hashing with `bcryptjs` (salt rounds: 10). **Zero plaintext passwords** are stored or exposed.
+- **Roles Supported**:
+  - `CITIZEN`: Issue reporting, viewing personal complaints and status updates.
+  - `OFFICER`: Field resolution, updating complaint status, and uploading resolution proof (requires `APPROVED` verification status).
+  - `ADMIN`: System administration, approving officer registrations, and managing departments.
 
-### Core Entities & Relationships
+---
 
-| Entity | Table Name | Description | Key Relationships |
+### 2. Authentication API Endpoints (`/api/v1/auth/*`)
+
+| Method | Endpoint | Access | Description |
 | :--- | :--- | :--- | :--- |
-| **User** | `users` | Citizens, Officers, Admins | 1:1 with `OfficerProfile`, 1:M with `Complaint`, 1:M with `Notification` |
-| **Department** | `departments` | 10 core civic departments | 1:M with `OfficerProfile`, 1:M with `DepartmentOffice`, 1:M with `Complaint` |
-| **OfficerProfile** | `officer_profiles` | Field officer credentials & verification | 1:1 with `User`, M:1 with `Department`, 1:M with `ComplaintAssignment`, 1:M with `Resolution` |
-| **DepartmentOffice** | `department_offices` | Geographical department offices | M:1 with `Department`, 1:M with `Complaint` |
-| **Complaint** | `complaints` | Civic issues filed by citizens | M:1 with `User` (citizen), M:1 with `Department`, M:1 with `DepartmentOffice` (optional), 1:M `ComplaintAssignment`, 1:M `ComplaintStatusHistory`, 1:1 `Resolution` |
-| **ComplaintAssignment**| `complaint_assignments` | Assignment of complaints to officers | M:1 with `Complaint`, M:1 with `OfficerProfile`, M:1 with `User` (assigner) |
-| **ComplaintStatusHistory** | `complaint_status_history` | Traceable status change audit log | M:1 with `Complaint`, M:1 with `User` (changer) |
-| **Resolution** | `resolutions` | Officer resolution notes and photo proof | 1:1 with `Complaint`, M:1 with `OfficerProfile` |
-| **Notification** | `notifications` | In-app user notifications | M:1 with `User` (recipient), M:1 with `Complaint` (optional) |
-
-### Enums
-- **`Role`**: `CITIZEN`, `OFFICER`, `ADMIN`
-- **`VerificationStatus`**: `PENDING`, `APPROVED`, `REJECTED`
-- **`Priority`**: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`
-- **`ComplaintStatus`**: `NEW`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`
-
-### Core Department List (Seeded)
-1. Municipality / Sanitation
-2. Roads & Infrastructure
-3. Water Supply
-4. Electricity
-5. Traffic
-6. Public Health
-7. Environment / Parks
-8. Fire & Emergency
-9. Public Transport
-10. Housing / Building Issues
+| `POST` | `/api/v1/auth/register` | Public | Citizen registration with validation, deduplication, and immediate JWT issuance |
+| `POST` | `/api/v1/auth/register/officer` | Public | Field officer registration; creates profile with `PENDING` verification status |
+| `POST` | `/api/v1/auth/login` | Public | Universal login for Citizens, Approved Officers, and Admins |
+| `GET` | `/api/v1/auth/me` | Authenticated | Retrieves current authenticated user profile & department details |
+| `POST` | `/api/v1/auth/logout` | Authenticated | Client-side logout confirmation |
+| `GET` | `/api/v1/auth/test/citizen-only` | `CITIZEN` | Diagnostic route verifying Citizen RBAC authorization |
+| `GET` | `/api/v1/auth/test/officer-only` | `OFFICER` | Diagnostic route verifying Approved Officer RBAC authorization |
+| `GET` | `/api/v1/auth/test/admin-only` | `ADMIN` | Diagnostic route verifying Admin RBAC authorization |
 
 ---
 
-## ⚙️ Prerequisites
-
-- **Node.js**: v18.0.0 or higher (v22+ recommended)
-- **npm**: v9.0.0 or higher
-- **PostgreSQL**: v14.0 or higher (or Docker)
+### 3. Officer Verification Lifecycle
+- When an officer registers via `/api/v1/auth/register/officer`, their account is created with `role: OFFICER` and `verification_status: PENDING`.
+- **Pending/Rejected Officers cannot log in and cannot access protected officer endpoints.** Login attempts return `403 Forbidden` (`"Officer account is pending administrative approval"`).
+- Only when an administrator approves the officer (`verification_status: APPROVED`) can the officer log in, receive a JWT token, and access officer workflows.
 
 ---
 
-## 🚀 Database Setup & Quick Start
+### 4. Development & Demo Admin Account
 
-### 1. Install Dependencies
+The project includes an administrator account created during database seeding ([`prisma/seed.ts`](file:///C:/Users/pered/.gemini/antigravity/scratch/civicsense-backend/prisma/seed.ts)):
 
-```bash
-npm install
-```
+- **Email**: `demo.admin@civicsense.local` (Configurable via `ADMIN_EMAIL` in `.env`)
+- **Password**: `AdminSecure123!` (Configurable via `ADMIN_PASSWORD` in `.env`)
+- **Role**: `ADMIN`
 
-### 2. Configure Environment Variables
-
-Copy `.env.example` to `.env`:
-
-```bash
-# Windows PowerShell
-Copy-Item .env.example .env
-
-# Linux / macOS / Git Bash
-cp .env.example .env
-```
-
-Adjust the database connection URL in `.env`:
-
-```env
-# PostgreSQL connection string
-# Format: postgresql://[user]:[password]@[host]:[port]/[database]?schema=[schema]
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/civicsense?schema=public"
-```
-
-### 3. Generate Prisma Client
-
-```bash
-npm run db:generate
-```
-
-### 4. Run Migrations
-
-To apply database migrations to your PostgreSQL instance:
-
-```bash
-# In Development (applies migrations and updates schema)
-npm run db:migrate
-
-# In Production / CI (applies pending migrations)
-npm run db:deploy
-```
-
-### 5. Seed the Database
-
-Populate the database with the 10 core departments, demo offices, demo users (hashed passwords), officer profiles, and sample complaints:
-
+To seed or reset the admin and demo accounts:
 ```bash
 npm run db:seed
 ```
 
-### 6. Reset the Development Database
+---
 
-To completely wipe and recreate the database with migrations and seeds:
+## ⚙️ Environment Variables
 
-```bash
-npm run db:reset
-```
+Add the following to your `.env` file (see `.env.example`):
 
-### 7. View Database with Prisma Studio
+```env
+# Server
+NODE_ENV=development
+PORT=5000
+API_PREFIX=/api
+CORS_ORIGIN=http://localhost:3000,http://localhost:5173
 
-To inspect database records interactively in your browser:
+# Database (PostgreSQL)
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/civicsense?schema=public"
 
-```bash
-npm run db:studio
+# Authentication & JWT Configuration
+JWT_SECRET="civicsense_jwt_secure_dev_secret_key_2026_!@#987"
+JWT_EXPIRES_IN="7d"
+
+# Seed Admin Credentials
+ADMIN_EMAIL="demo.admin@civicsense.local"
+ADMIN_PASSWORD="AdminSecure123!"
+
+# Rate Limiting
+RATE_LIMIT_WINDOW_MINUTES=15
+RATE_LIMIT_MAX_REQUESTS=100
+AUTH_RATE_LIMIT_MAX_REQUESTS=30
 ```
 
 ---
 
-## 🧪 Database & API Verification
+## 🧪 Testing & Verification
 
-### Verify Database Integrity & Models
+### Run the B3 Authentication Test Suite
+Runs tests covering all test cases (**A through J**):
+```bash
+npm run test:auth
+```
 
-Run the automated database test suite:
+| Test Case | Description | Expected Result |
+| :--- | :--- | :--- |
+| **Test A** | Citizen registration | `201 Created` + JWT token + role `CITIZEN` |
+| **Test B** | Duplicate citizen registration | `409 Conflict` |
+| **Test C** | Citizen login with correct password | `200 OK` + JWT token |
+| **Test D** | Citizen login with wrong password | `401 Unauthorized` |
+| **Test E** | Officer registration | `201 Created` + status `PENDING` |
+| **Test F** | Pending officer login | `403 Forbidden` (Approval required) |
+| **Test G** | Approved officer login | `200 OK` + token & department metadata |
+| **Test H** | `GET /auth/me` with valid token | `200 OK` + safe user profile |
+| **Test I** | `GET /auth/me` without token | `401 Unauthorized` |
+| **Test J** | Wrong role accessing protected endpoint | `403 Forbidden` (RBAC enforced) |
 
+### Run Database Integrity Checks
 ```bash
 npm run test:db
 ```
 
-This verifies:
-- Schema definitions, enums, models, and relations
-- PostgreSQL DDL migration syntax and foreign key integrity
-- Seed department completeness and demo data structures
-- Zero plaintext passwords (all user passwords validated as bcrypt hashes)
-- Live database queries and foreign-key constraints (when database is online)
-
-### Verify API Server & Health Check
-
-1. Start the development server:
-   ```bash
-   npm run dev
-   ```
-
-2. Run the HTTP endpoint test script:
-   ```bash
-   npm test
-   ```
-
-3. Manual Health Check:
-   ```bash
-   # Using curl
-   curl http://localhost:5000/api/health
-
-   # Using PowerShell
-   Invoke-RestMethod -Uri "http://localhost:5000/api/health" -Method Get
-   ```
+### Run TypeScript Checks & Build
+```bash
+npm run lint
+npm run build
+```
 
 ---
 
-## 🔐 Security & Password Policy
+## 📖 Manual API Testing Guide (curl & PowerShell)
 
-- **No Plaintext Passwords**: User passwords must always be salted and hashed with `bcryptjs` or standard hashing before storing in the database.
-- **Foreign Key Constraints**: Cascading deletes are enforced on user profiles/notifications; strict restrict rules prevent orphaned complaints or departments.
-- **Graceful Shutdown**: The server gracefully closes database connection pools on `SIGINT` / `SIGTERM` signals.
+### 1. Citizen Registration
+```bash
+# Using curl:
+curl -X POST http://localhost:5000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Jane Citizen",
+    "email": "jane@example.com",
+    "phone": "+91-9876543210",
+    "password": "Password123!"
+  }'
+```
+
+### 2. Citizen / Officer / Admin Login
+```bash
+# Using curl:
+curl -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "demo.admin@civicsense.local",
+    "password": "AdminSecure123!"
+  }'
+```
+
+### 3. Get Current User Profile (`/auth/me`)
+```bash
+# Using curl:
+curl http://localhost:5000/api/v1/auth/me \
+  -H "Authorization: Bearer <YOUR_JWT_TOKEN>"
+```

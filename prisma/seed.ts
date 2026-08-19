@@ -4,7 +4,12 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 // Standard demo password hash: bcrypt hash of 'DemoPassword123!' (never store plaintext)
-const DEMO_PASSWORD_HASH = bcrypt.hashSync('DemoPassword123!', 10);
+const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD || 'DemoPassword123!';
+const DEMO_PASSWORD_HASH = bcrypt.hashSync(DEMO_USER_PASSWORD, 10);
+
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'demo.admin@civicsense.local';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'AdminSecure123!';
+const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 10);
 
 export async function main() {
   console.log('🌱 Starting CivicSense database seed...');
@@ -220,10 +225,10 @@ export async function main() {
   // Demo Admin
   const demoAdmin = await prisma.user.create({
     data: {
-      name: 'Demo Admin',
-      email: 'demo.admin@civicsense.local',
+      name: 'Demo Administrator',
+      email: ADMIN_EMAIL,
       phone: '+91-9876543210',
-      password_hash: DEMO_PASSWORD_HASH,
+      password_hash: ADMIN_PASSWORD_HASH,
       role: Role.ADMIN,
     },
   });
