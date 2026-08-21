@@ -1,6 +1,6 @@
 # CivicSense - Backend & Database Infrastructure
 
-CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, and department-based authorization infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
+CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, and department/office management infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
 
 ---
 
@@ -17,6 +17,7 @@ civicsense-backend/
 ├── test_database.ts              # Database schema & integrity verification suite
 ├── test_auth.ts                  # B3 Authentication verification test suite
 ├── test_authorization.ts         # B4 Authorization & Department Access Control test suite
+├── test_departments.ts           # B5 Department & Office Management test suite
 ├── README.md                     # Documentation
 ├── prisma/
 │   ├── schema.prisma             # PostgreSQL schema definition & models
@@ -40,13 +41,14 @@ civicsense-backend/
     │   └── validate.middleware.ts # Zod-based request validation middleware
     ├── utils/
     │   ├── authHelpers.ts        # Pure, reusable authorization helpers (department, ownership, roles)
+    │   ├── geo.ts                # Geodesic & Haversine distance calculation utilities
     │   ├── apiResponse.ts        # Standardized success/error JSON response utility
     │   ├── apiError.ts           # Custom operational HTTP error hierarchy
     │   └── logger.ts             # Application logger
     ├── routes/
     │   ├── index.ts              # Root /api aggregator
     │   └── v1/
-    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /health, /test)
+    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /departments, /offices, /test)
     │       ├── health.route.ts   # Health check route
     │       └── test.route.ts     # Diagnostic & RBAC/DAC test route
     └── modules/
@@ -55,8 +57,12 @@ civicsense-backend/
         │   ├── auth.service.ts   # Auth business logic, token issuing & verification
         │   ├── auth.schema.ts    # Zod input validation schemas
         │   └── auth.route.ts     # /api/v1/auth router definitions
+        ├── departments/          # B5: Departments & Department Offices Management
+        │   ├── departments.controller.ts # Department & Office HTTP handlers
+        │   ├── departments.service.ts    # Business logic & Haversine nearest-office locator
+        │   ├── departments.schema.ts     # Zod input & coordinate validation schemas
+        │   └── departments.route.ts      # /api/v1/departments & /api/v1/offices router definitions
         ├── users/                # Future: Citizen profiles & preferences
-        ├── departments/          # Future: Civic departments & SLAs
         ├── complaints/           # Future: Issue reporting, tracking & resolution workflows
         ├── notifications/        # Future: Multi-channel notifications (Push, SMS, Email)
         ├── officers/             # Future: Field officer assignments & management
@@ -65,145 +71,197 @@ civicsense-backend/
 
 ---
 
-## 🔒 Authentication vs. Authorization
+## 🏢 Departments & Office System (B5)
 
-CivicSense maintains a clear separation between **Authentication (B3)** and **Authorization (B4)**:
+### 1. The 10 Core Civic Departments
 
-| Concept | Layer | Purpose | HTTP Failure |
-| :--- | :--- | :--- | :--- |
-| **Authentication** | `authenticate`, `requireAuthentication` | **"Who are you?"** Validates JWT bearer tokens, checks token expiry, and resolves the live database user record to `req.user`. | `401 Unauthorized` |
-| **Authorization** | `requireRoles`, `requireCitizen`, `requireOfficer`, `requireAdmin`, `requireDepartmentAccess`, `requireResourceOwner` | **"What are you allowed to do?"** Evaluates whether the authenticated user has permission to access a specific resource or department. | `403 Forbidden` |
+CivicSense categorizes municipal and urban civic issues under 10 standardized departments:
+
+1. **Municipality / Sanitation** — Solid waste management, garbage clearance, drain cleaning, and street sweeping.
+2. **Roads & Infrastructure** — Pothole repair, road resurfacing, footpath maintenance, and bridge safety.
+3. **Water Supply** — Potable water distribution, pipeline leak repairs, and water contamination.
+4. **Electricity** — Streetlight faults, power outages, damaged electrical poles, and exposed wiring.
+5. **Traffic** — Traffic signal synchronization, road signages, zebra crossings, and congestion management.
+6. **Public Health** — Vector control, disease prevention, public toilet hygiene, and medical clinic monitoring.
+7. **Environment / Parks** — Public parks, tree pruning, pollution checks, and urban greenery preservation.
+8. **Fire & Emergency** — Fire hazard reporting, safety compliance, hydrant checks, and emergency preparedness.
+9. **Public Transport** — Bus stop maintenance, commuter facilities, and transit terminal upkeep.
+10. **Housing / Building Issues** — Unauthorized construction alerts, building safety violations, and zoning compliance.
 
 ---
 
-## 🛡️ Authorization & Department Access Control (B4)
+### 2. Department & Office Relational Hierarchy
 
-### 1. Role Permissions Matrix
+```
+┌────────────────────────────────────────────────────────┐
+│                   DEPARTMENT                           │
+│   (id, name, description, active, created_at, ...)     │
+└──────────────────────────┬─────────────────────────────┘
+                           │ 1-to-Many
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│                DEPARTMENT OFFICE                       │
+│   (id, department_id, name, address,                   │
+│    latitude, longitude, active, created_at, ...)       │
+└────────────────────────────────────────────────────────┘
+```
 
-| Role | Permitted Actions | Restricted Actions |
+- Each department can have multiple regional/ward offices.
+- Each office contains precise GPS coordinates (`latitude`, `longitude`) used for spatial routing.
+- Immutability rule: Once created, an office cannot have its `department_id` modified by client requests.
+
+---
+
+### 3. Department & Office API Endpoints
+
+#### Public / Authenticated Read Endpoints:
+
+| Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `CITIZEN` | • Register & log in immediately<br>• Access personal citizen endpoints<br>• Access and manage own complaints & notifications | • Cannot access officer endpoints (`403 Forbidden`)<br>• Cannot access admin endpoints (`403 Forbidden`)<br>• Cannot access other citizens' private resources |
-| `OFFICER` | • Register account (status: `PENDING`)<br>• Once `APPROVED`, log in and access officer workflows<br>• Access department-specific issues belonging to **their assigned department only** | • `PENDING` or `REJECTED` officers cannot access protected officer endpoints (`403 Forbidden`)<br>• Cannot access resources belonging to other civic departments (`403 Forbidden`)<br>• Cannot access admin endpoints (`403 Forbidden`) |
-| `ADMIN` | • Manage system configuration & users<br>• Approve or reject officer registrations<br>• Super-access: view & manage resources across **all departments** | • N/A (Full platform administrative access) |
+| `GET` | `/api/v1/departments` | Lists all active civic departments formatted for frontend selection. |
+| `GET` | `/api/v1/departments/:departmentId` | Retrieves a single active department by UUID. |
+| `GET` | `/api/v1/departments/:departmentId/offices` | Retrieves all active offices belonging to the specified department. |
+| `GET` | `/api/v1/departments/:departmentId/nearest-office` | Calculates the closest department office to supplied GPS coordinates (`?latitude=...&longitude=...`). |
+| `GET` | `/api/v1/offices/:officeId` | Retrieves an individual office by UUID including its department metadata. |
+
+#### Administrative Modification Endpoints (`ADMIN` Only):
+
+| Method | Endpoint | Authorization | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/departments` | `ADMIN` | Create a new department. |
+| `PATCH` | `/api/v1/departments/:departmentId` | `ADMIN` | Update department name, description, or active status. |
+| `POST` | `/api/v1/departments/:departmentId/offices` | `ADMIN` | Create a new office under a department. |
+| `PATCH` | `/api/v1/offices/:officeId` | `ADMIN` | Update office details (`name`, `address`, `latitude`, `longitude`, `active`). |
+| `DELETE` | `/api/v1/offices/:officeId` | `ADMIN` | Deactivate an office (`active = false`). |
 
 ---
 
-### 2. Officer Verification Rules
+### 4. Nearest-Office Calculation (Haversine Distance)
 
-Every officer account lifecycle follows strict state transitions:
+When citizens report issues with GPS coordinates, CivicSense automatically routes complaints to the nearest office of the relevant department using the **Haversine Geodesic Distance Formula**:
 
-```
-[Register] ──> PENDING ──┬──> (Admin Approves) ──> APPROVED (Full officer access to assigned department)
-                         └──> (Admin Rejects)  ──> REJECTED (Denied access - 403 Forbidden)
-```
+$$\Delta\text{lat} = \frac{(\text{lat}_2 - \text{lat}_1) \cdot \pi}{180}, \quad \Delta\text{lon} = \frac{(\text{lon}_2 - \text{lon}_1) \cdot \pi}{180}$$
+$$a = \sin^2\left(\frac{\Delta\text{lat}}{2}\right) + \cos\left(\frac{\text{lat}_1 \cdot \pi}{180}\right) \cdot \cos\left(\frac{\text{lat}_2 \cdot \pi}{180}\right) \cdot \sin^2\left(\frac{\Delta\text{lon}}{2}\right)$$
+$$c = 2 \cdot \text{atan2}\left(\sqrt{a}, \sqrt{1 - a}\right)$$
+$$d = R \cdot c \quad (\text{where } R = 6,371 \text{ km})$$
 
-- **Rule 1**: Every officer belongs to **exactly one department** mapped through `officer_profiles.department_id`.
-- **Rule 2**: An officer can access protected officer functionality **ONLY** when `role = OFFICER` **AND** `verification_status = APPROVED`.
-- **Rule 3**: `PENDING` and `REJECTED` officers are denied access (`403 Forbidden`) across all officer endpoints.
-
----
-
-### 3. Department Access Control Rules & Zero-Trust Security
-
-- **Server-Authoritative Identity**: Permissions, officer department associations, user IDs, and roles are **never trusted from the frontend payload** (request body, headers, or query parameters).
-- **Single Source of Truth**: The authenticated user's database record (`req.user` / `req.user.officer_profile`) is the single source of truth.
-- **Cross-Department Isolation**: An officer assigned to **Municipality / Sanitation** cannot view or modify resources belonging to **Electricity**, **Water Supply**, **Roads & Infrastructure**, or any other department (`403 Forbidden`).
-- **Administrative Override**: Users with role `ADMIN` have administrative access across all departments.
-
----
-
-### 4. Citizen Resource Ownership
-
-- A citizen can only access resources belonging to their own user account (`req.user.id === resource.citizen_id`).
-- Attempting to access another citizen's resource returns `403 Forbidden`.
-- Platform administrators retain administrative access across resources.
-
----
-
-### 5. Reusable Middleware & Helper Suite
-
-The authorization layer provides reusable middlewares and utility helpers for all future modules:
-
-#### Middlewares (`src/middlewares/auth.middleware.ts` or `src/middlewares/authorization.middleware.ts`):
+#### Programmatic Usage in Services / Controllers:
 ```typescript
-import {
-  requireAuthentication,
-  requireCitizen,
-  requireOfficer,
-  requireApprovedOfficer,
-  requireAdmin,
-  requireRoles,
-  requireDepartmentAccess,
-  requireResourceOwner,
-} from './middlewares/auth.middleware.js';
+import { DepartmentsService } from './modules/departments/departments.service.js';
 
-// Examples:
-router.get('/citizen-data', requireAuthentication, requireCitizen, handler);
-router.get('/admin-dashboard', requireAuthentication, requireAdmin, handler);
-router.get('/staff-only', requireAuthentication, requireRoles(Role.OFFICER, Role.ADMIN), handler);
-router.get('/dept-issues/:departmentId', requireAuthentication, requireDepartmentAccess(), handler);
-router.get('/users/:userId/data', requireAuthentication, requireResourceOwner(), handler);
+// Calculate closest office for complaint routing:
+const result = await DepartmentsService.findNearestDepartmentOffice(
+  departmentId,
+  12.9784, // latitude
+  77.6408  // longitude
+);
+
+console.log(result.office.name); // e.g. "East Ward Sanitation Office"
+console.log(result.distanceKm);  // e.g. 1.02 km
 ```
 
-#### Helper Utilities (`src/utils/authHelpers.ts`):
-```typescript
-import {
-  getAuthenticatedUser,
-  requireApprovedOfficer,
-  checkDepartmentAccess,
-  assertDepartmentAccess,
-  checkResourceOwner,
-  assertResourceOwner,
-} from './utils/authHelpers.js';
+---
 
-// Examples in services/controllers:
-const user = getAuthenticatedUser(req);
-const officerProfile = requireApprovedOfficer(user);
-assertDepartmentAccess(user, targetDepartmentId);
-assertResourceOwner(user, resourceOwnerId);
+### 5. Example API Requests & Responses
+
+#### A. List Active Departments
+```bash
+curl http://localhost:5000/api/v1/departments
+```
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Municipality / Sanitation",
+      "description": "Solid waste management, garbage clearance, drain cleaning...",
+      "active": true,
+      "officeCount": 2,
+      "officerCount": 1,
+      "createdAt": "2026-08-21T00:00:00.000Z"
+    }
+  ],
+  "message": "Active departments retrieved successfully"
+}
+```
+
+#### B. Find Nearest Office
+```bash
+curl "http://localhost:5000/api/v1/departments/11111111-1111-1111-1111-111111111111/nearest-office?latitude=12.9784&longitude=77.6408"
+```
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "office": {
+      "id": "aaaa2222-2222-2222-2222-222222222222",
+      "department_id": "11111111-1111-1111-1111-111111111111",
+      "name": "East Ward Sanitation Office",
+      "address": "Building B, 8th Cross, Indiranagar East",
+      "latitude": 12.981,
+      "longitude": 77.632,
+      "active": true
+    },
+    "department": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Municipality / Sanitation"
+    },
+    "distanceKm": 1.02,
+    "distanceMeters": 1020,
+    "queriedCoordinates": {
+      "latitude": 12.9784,
+      "longitude": 77.6408
+    }
+  },
+  "message": "Nearest department office calculated successfully"
+}
 ```
 
 ---
 
 ## 🧪 Testing & Verification
 
-### Run the B4 Authorization Test Suite
-Executes unit tests and live HTTP integration tests for all **11 required test cases (A through K + Resource Ownership)**:
-
+### Run the B5 Department & Office Test Suite
 ```bash
-npm run test:authz
+npm run test:departments
 ```
 
-| Test Case | Scenario | Expected Result |
+| Test ID | Scenario | Expected Result |
 | :--- | :--- | :--- |
-| **Test A** | Unauthenticated user → protected endpoint | `401 Unauthorized` |
-| **Test B** | Citizen → citizen endpoint | `200 OK` (Allowed) |
-| **Test C** | Citizen → officer endpoint | `403 Forbidden` |
-| **Test D** | Citizen → admin endpoint | `403 Forbidden` |
-| **Test E** | Approved officer → officer endpoint | `200 OK` (Allowed) |
-| **Test F** | Pending officer → officer endpoint | `403 Forbidden` |
-| **Test G** | Rejected officer → officer endpoint | `403 Forbidden` |
-| **Test H** | Officer → admin endpoint | `403 Forbidden` |
-| **Test I** | Admin → admin endpoint | `200 OK` (Allowed) |
-| **Test J** | Officer from Dept A → protected Dept B resource | `403 Forbidden` (Dept A allowed, Dept B blocked) |
-| **Test K** | Officer attempts to manipulate `department_id` in request | `403 Forbidden` (Database profile is source of truth) |
-| **Test L** | Citizen Resource Ownership & Isolation | `200 OK` for own resource, `403 Forbidden` for other's resource, `200 OK` for Admin |
+| **GEO-1** | Haversine distance accuracy | Distance within ±0.1 km of known geodesic reference |
+| **GEO-2** | Coordinate boundary validation | Validates \([-90..90]\) lat and \([-180..180]\) lon |
+| **Test A** | Get all departments | `200 OK` + array of 10 active departments |
+| **Test B** | Get active department by ID | `200 OK` + department details |
+| **Test C** | Invalid department ID / non-existent | `422 ValidationError` for malformed UUID; `404 Not Found` for non-existent |
+| **Test D** | Get offices for department | `200 OK` + active offices list |
+| **Test E** | Invalid department office query | `404 Not Found` |
+| **Test F** | Get specific office by ID | `200 OK` + office and department metadata |
+| **Test G** | Nearest-office calculation | `200 OK` + closest office identified with exact distance |
+| **Test H** | Out-of-bounds latitude/longitude | `422 ValidationError` |
+| **Test I** | Unauthorized modification (Citizen/Officer) | `401 Unauthorized` / `403 Forbidden` |
+| **Test J** | Admin modification (Create/Update) | `201 Created` / `200 OK` |
 
 ---
 
-### Run All Test Suites
+### Run Full Test Suite Across All Modules
 
 ```bash
-# Run B4 Authorization Tests
+# Run B5 Department & Office Management Tests
+npm run test:departments
+
+# Run B4 Authorization & Department Access Control Tests
 npm run test:authz
 
-# Run B3 Authentication Tests
+# Run B3 Authentication & RBAC Tests
 npm run test:auth
 
 # Run B1/B2 Database Schema Integrity Checks
 npm run test:db
 
-# Run TypeScript Linting & Build
+# Run TypeScript Linting & Compilation Build
 npm run lint
 npm run build
 ```

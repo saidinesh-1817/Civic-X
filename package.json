@@ -18,7 +18,8 @@
     "db:studio": "prisma studio",
     "test:db": "tsx test_database.ts",
     "test:auth": "tsx test_auth.ts",
-    "test:authz": "tsx test_authorization.ts"
+    "test:authz": "tsx test_authorization.ts",
+    "test:departments": "tsx test_departments.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -36,7 +37,9 @@
     "auth",
     "jwt",
     "rbac",
-    "authorization"
+    "authorization",
+    "departments",
+    "offices"
   ],
   "author": "CivicSense Team",
   "license": "ISC",
