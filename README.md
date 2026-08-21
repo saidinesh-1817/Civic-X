@@ -1,6 +1,6 @@
 # CivicSense - Backend & Database Infrastructure
 
-CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, and department/office management infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
+CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, department/office management, and complaint creation infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
 
 ---
 
@@ -18,6 +18,7 @@ civicsense-backend/
 ├── test_auth.ts                  # B3 Authentication verification test suite
 ├── test_authorization.ts         # B4 Authorization & Department Access Control test suite
 ├── test_departments.ts           # B5 Department & Office Management test suite
+├── test_complaints.ts            # B6 Complaint Creation & Submission test suite
 ├── README.md                     # Documentation
 ├── prisma/
 │   ├── schema.prisma             # PostgreSQL schema definition & models
@@ -41,6 +42,7 @@ civicsense-backend/
     │   └── validate.middleware.ts # Zod-based request validation middleware
     ├── utils/
     │   ├── authHelpers.ts        # Pure, reusable authorization helpers (department, ownership, roles)
+    │   ├── fileStorage.ts        # File storage & image validation utility
     │   ├── geo.ts                # Geodesic & Haversine distance calculation utilities
     │   ├── apiResponse.ts        # Standardized success/error JSON response utility
     │   ├── apiError.ts           # Custom operational HTTP error hierarchy
@@ -48,7 +50,7 @@ civicsense-backend/
     ├── routes/
     │   ├── index.ts              # Root /api aggregator
     │   └── v1/
-    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /departments, /offices, /test)
+    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /departments, /offices, /complaints, /test)
     │       ├── health.route.ts   # Health check route
     │       └── test.route.ts     # Diagnostic & RBAC/DAC test route
     └── modules/
@@ -62,8 +64,12 @@ civicsense-backend/
         │   ├── departments.service.ts    # Business logic & Haversine nearest-office locator
         │   ├── departments.schema.ts     # Zod input & coordinate validation schemas
         │   └── departments.route.ts      # /api/v1/departments & /api/v1/offices router definitions
+        ├── complaints/           # B6: Complaint Creation & Submission
+        │   ├── complaints.controller.ts  # Complaint HTTP handlers
+        │   ├── complaints.service.ts     # Complaint lifecycle, auto-routing & tracking logic
+        │   ├── complaints.schema.ts      # Zod complaint submission schemas
+        │   └── complaints.route.ts       # /api/v1/complaints router definitions
         ├── users/                # Future: Citizen profiles & preferences
-        ├── complaints/           # Future: Issue reporting, tracking & resolution workflows
         ├── notifications/        # Future: Multi-channel notifications (Push, SMS, Email)
         ├── officers/             # Future: Field officer assignments & management
         └── administration/       # Future: Administrative controls, wards & metrics
@@ -71,184 +77,134 @@ civicsense-backend/
 
 ---
 
-## 🏢 Departments & Office System (B5)
+## 📝 Complaint Creation & Submission (B6)
 
-### 1. The 10 Core Civic Departments
+### 1. Complaint Submission Flow
 
-CivicSense categorizes municipal and urban civic issues under 10 standardized departments:
-
-1. **Municipality / Sanitation** — Solid waste management, garbage clearance, drain cleaning, and street sweeping.
-2. **Roads & Infrastructure** — Pothole repair, road resurfacing, footpath maintenance, and bridge safety.
-3. **Water Supply** — Potable water distribution, pipeline leak repairs, and water contamination.
-4. **Electricity** — Streetlight faults, power outages, damaged electrical poles, and exposed wiring.
-5. **Traffic** — Traffic signal synchronization, road signages, zebra crossings, and congestion management.
-6. **Public Health** — Vector control, disease prevention, public toilet hygiene, and medical clinic monitoring.
-7. **Environment / Parks** — Public parks, tree pruning, pollution checks, and urban greenery preservation.
-8. **Fire & Emergency** — Fire hazard reporting, safety compliance, hydrant checks, and emergency preparedness.
-9. **Public Transport** — Bus stop maintenance, commuter facilities, and transit terminal upkeep.
-10. **Housing / Building Issues** — Unauthorized construction alerts, building safety violations, and zoning compliance.
+```
+[Authenticated Citizen]
+       │
+       ▼  POST /api/v1/complaints (with title, description, department_id, GPS, photo)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. Validate Citizen Session (req.user.id, role = CITIZEN)                   │
+│ 2. Validate Department (active = true)                                      │
+│ 3. Validate & Store Photo (Magic byte inspection, safe unique filename)     │
+│ 4. Automatic Spatial Routing: Haversine distance -> nearest department office│
+│ 5. Atomic DB Transaction:                                                   │
+│    • Complaint created with default status = 'NEW', priority = 'MEDIUM'     │
+│    • Initial ComplaintStatusHistory created (changed_by = citizen.id)       │
+│ 6. Generate human-readable identifier (CIV-######)                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼  201 Created
+[Safe Formatted Complaint Response with tracking number]
+```
 
 ---
 
-### 2. Department & Office Relational Hierarchy
-
-```
-┌────────────────────────────────────────────────────────┐
-│                   DEPARTMENT                           │
-│   (id, name, description, active, created_at, ...)     │
-└──────────────────────────┬─────────────────────────────┘
-                           │ 1-to-Many
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│                DEPARTMENT OFFICE                       │
-│   (id, department_id, name, address,                   │
-│    latitude, longitude, active, created_at, ...)       │
-└────────────────────────────────────────────────────────┘
-```
-
-- Each department can have multiple regional/ward offices.
-- Each office contains precise GPS coordinates (`latitude`, `longitude`) used for spatial routing.
-- Immutability rule: Once created, an office cannot have its `department_id` modified by client requests.
-
----
-
-### 3. Department & Office API Endpoints
-
-#### Public / Authenticated Read Endpoints:
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/v1/departments` | Lists all active civic departments formatted for frontend selection. |
-| `GET` | `/api/v1/departments/:departmentId` | Retrieves a single active department by UUID. |
-| `GET` | `/api/v1/departments/:departmentId/offices` | Retrieves all active offices belonging to the specified department. |
-| `GET` | `/api/v1/departments/:departmentId/nearest-office` | Calculates the closest department office to supplied GPS coordinates (`?latitude=...&longitude=...`). |
-| `GET` | `/api/v1/offices/:officeId` | Retrieves an individual office by UUID including its department metadata. |
-
-#### Administrative Modification Endpoints (`ADMIN` Only):
+### 2. Endpoints Specification
 
 | Method | Endpoint | Authorization | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/departments` | `ADMIN` | Create a new department. |
-| `PATCH` | `/api/v1/departments/:departmentId` | `ADMIN` | Update department name, description, or active status. |
-| `POST` | `/api/v1/departments/:departmentId/offices` | `ADMIN` | Create a new office under a department. |
-| `PATCH` | `/api/v1/offices/:officeId` | `ADMIN` | Update office details (`name`, `address`, `latitude`, `longitude`, `active`). |
-| `DELETE` | `/api/v1/offices/:officeId` | `ADMIN` | Deactivate an office (`active = false`). |
+| `POST` | `/api/v1/complaints` | `CITIZEN` | Submit a new civic issue report. |
 
----
-
-### 4. Nearest-Office Calculation (Haversine Distance)
-
-When citizens report issues with GPS coordinates, CivicSense automatically routes complaints to the nearest office of the relevant department using the **Haversine Geodesic Distance Formula**:
-
-$$\Delta\text{lat} = \frac{(\text{lat}_2 - \text{lat}_1) \cdot \pi}{180}, \quad \Delta\text{lon} = \frac{(\text{lon}_2 - \text{lon}_1) \cdot \pi}{180}$$
-$$a = \sin^2\left(\frac{\Delta\text{lat}}{2}\right) + \cos\left(\frac{\text{lat}_1 \cdot \pi}{180}\right) \cdot \cos\left(\frac{\text{lat}_2 \cdot \pi}{180}\right) \cdot \sin^2\left(\frac{\Delta\text{lon}}{2}\right)$$
-$$c = 2 \cdot \text{atan2}\left(\sqrt{a}, \sqrt{1 - a}\right)$$
-$$d = R \cdot c \quad (\text{where } R = 6,371 \text{ km})$$
-
-#### Programmatic Usage in Services / Controllers:
-```typescript
-import { DepartmentsService } from './modules/departments/departments.service.js';
-
-// Calculate closest office for complaint routing:
-const result = await DepartmentsService.findNearestDepartmentOffice(
-  departmentId,
-  12.9784, // latitude
-  77.6408  // longitude
-);
-
-console.log(result.office.name); // e.g. "East Ward Sanitation Office"
-console.log(result.distanceKm);  // e.g. 1.02 km
-```
-
----
-
-### 5. Example API Requests & Responses
-
-#### A. List Active Departments
-```bash
-curl http://localhost:5000/api/v1/departments
-```
-**Response (200 OK):**
+#### Request Body (`application/json`):
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "11111111-1111-1111-1111-111111111111",
-      "name": "Municipality / Sanitation",
-      "description": "Solid waste management, garbage clearance, drain cleaning...",
-      "active": true,
-      "officeCount": 2,
-      "officerCount": 1,
-      "createdAt": "2026-08-21T00:00:00.000Z"
-    }
-  ],
-  "message": "Active departments retrieved successfully"
+  "title": "Overflowing Garbage Bin on 4th Cross",
+  "description": "Community garbage bin has not been cleared for 3 days and is overflowing onto the street.",
+  "department_id": "11111111-1111-1111-1111-111111111111",
+  "latitude": 12.9810,
+  "longitude": 77.6320,
+  "photo": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ..."
 }
 ```
 
-#### B. Find Nearest Office
-```bash
-curl "http://localhost:5000/api/v1/departments/11111111-1111-1111-1111-111111111111/nearest-office?latitude=12.9784&longitude=77.6408"
-```
-**Response (200 OK):**
+#### Successful Response (`201 Created`):
 ```json
 {
   "success": true,
+  "message": "Complaint registered successfully",
   "data": {
-    "office": {
-      "id": "aaaa2222-2222-2222-2222-222222222222",
-      "department_id": "11111111-1111-1111-1111-111111111111",
-      "name": "East Ward Sanitation Office",
-      "address": "Building B, 8th Cross, Indiranagar East",
-      "latitude": 12.981,
-      "longitude": 77.632,
-      "active": true
-    },
+    "id": "c0000000-0000-0000-0000-000000000001",
+    "complaint_number": "CIV-100001",
+    "title": "Overflowing Garbage Bin on 4th Cross",
+    "description": "Community garbage bin has not been cleared for 3 days and is overflowing onto the street.",
+    "photo_url": "/uploads/complaints/complaints_1787305809782_3a8ecb7a32f69dba.png",
+    "latitude": 12.981,
+    "longitude": 77.632,
+    "priority": "MEDIUM",
+    "status": "NEW",
     "department": {
       "id": "11111111-1111-1111-1111-111111111111",
-      "name": "Municipality / Sanitation"
+      "name": "Municipality / Sanitation",
+      "description": "Solid waste management & sanitation"
     },
-    "distanceKm": 1.02,
-    "distanceMeters": 1020,
-    "queriedCoordinates": {
-      "latitude": 12.9784,
-      "longitude": 77.6408
-    }
-  },
-  "message": "Nearest department office calculated successfully"
+    "office": {
+      "id": "aaaa2222-2222-2222-2222-222222222222",
+      "name": "East Ward Sanitation Office",
+      "address": "Building B, Indiranagar East",
+      "latitude": 12.981,
+      "longitude": 77.632
+    },
+    "citizen": {
+      "id": "user-cit-1111",
+      "name": "Jane Citizen",
+      "email": "jane.citizen@civicsense.local"
+    },
+    "created_at": "2026-08-21T09:50:09.000Z"
+  }
 }
 ```
+
+---
+
+### 3. Security & Anti-Spoofing Guarantees
+
+1. **`citizen_id` Zero Trust**: Sourced strictly from authenticated session token (`req.user.id`). Client attempts to submit `citizen_id` are completely ignored.
+2. **Lifecycle Defaults**: `status` is hardcoded to `NEW`; `priority` is hardcoded to `MEDIUM`. Frontend attempts to submit spoofed status or priority values are stripped.
+3. **Role Enforcement**: Only users with `role = CITIZEN` can create complaints (`403 Forbidden` for Officers or unapproved accounts).
+4. **Photo Validation**: Image uploads are inspected for valid magic bytes (`JPEG`, `PNG`, `WEBP`, `GIF`) to prevent file-type spoofing or executable payload uploads. Size is capped at 5 MB.
+5. **Geographic Boundaries**: Latitudes outside \([-90, 90]\) and longitudes outside \([-180, 180]\) are rejected with `422 ValidationError`.
 
 ---
 
 ## 🧪 Testing & Verification
 
-### Run the B5 Department & Office Test Suite
+### Run the B6 Complaint Creation Test Suite
 ```bash
-npm run test:departments
+npm run test:complaints
 ```
 
 | Test ID | Scenario | Expected Result |
 | :--- | :--- | :--- |
-| **GEO-1** | Haversine distance accuracy | Distance within ±0.1 km of known geodesic reference |
-| **GEO-2** | Coordinate boundary validation | Validates \([-90..90]\) lat and \([-180..180]\) lon |
-| **Test A** | Get all departments | `200 OK` + array of 10 active departments |
-| **Test B** | Get active department by ID | `200 OK` + department details |
-| **Test C** | Invalid department ID / non-existent | `422 ValidationError` for malformed UUID; `404 Not Found` for non-existent |
-| **Test D** | Get offices for department | `200 OK` + active offices list |
-| **Test E** | Invalid department office query | `404 Not Found` |
-| **Test F** | Get specific office by ID | `200 OK` + office and department metadata |
-| **Test G** | Nearest-office calculation | `200 OK` + closest office identified with exact distance |
-| **Test H** | Out-of-bounds latitude/longitude | `422 ValidationError` |
-| **Test I** | Unauthorized modification (Citizen/Officer) | `401 Unauthorized` / `403 Forbidden` |
-| **Test J** | Admin modification (Create/Update) | `201 Created` / `200 OK` |
+| **S1** | Photo storage & unique filename generation | Safe URL reference generated under `/uploads/complaints/` |
+| **S2** | Reject spoofed / malicious image headers | `400 BadRequestError` |
+| **S3** | Deterministic human-readable identifier format | `CIV-######` format verified |
+| **Test A** | Authenticated citizen submits valid complaint | `201 Created` |
+| **Test B** | Citizen submits valid photo | Photo stored & referenced in `photo_url` |
+| **Test C** | Citizen submits GPS coordinates | Geolocation persisted |
+| **Test D** | Department selection | Correct department association stored |
+| **Test E** | Nearest office exists | `office_id` automatically resolved via Haversine and stored |
+| **Test F** | Department without active offices | Complaint created with `office_id = null` |
+| **Test G** | Unauthenticated user | `401 Unauthorized` |
+| **Test H** | Officer attempts to create citizen complaint | `403 Forbidden` |
+| **Test I** | Inactive or non-existent department | `404 Not Found` |
+| **Test J** | Out-of-bounds latitude/longitude | `422 ValidationError` |
+| **Test K** | Invalid / corrupt image data | `400 BadRequestError` |
+| **Test L** | Client attempts to inject `citizen_id`, `priority`, or `status` | Ignored; server session and defaults enforced |
+| **Test M** | Initial complaint status | Hardcoded to `NEW` |
+| **Test N** | Initial `ComplaintStatusHistory` record | Logged with `status = NEW` & `changed_by = citizen.id` |
+| **Test O** | Unique `CIV-...` human-readable complaint ID | Generated and exposed in API response |
 
 ---
 
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B6 Complaint Creation Tests
+npm run test:complaints
+
 # Run B5 Department & Office Management Tests
 npm run test:departments
 

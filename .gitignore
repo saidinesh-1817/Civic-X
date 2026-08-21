@@ -28,3 +28,6 @@ Thumbs.db
 # Temporary directories
 tmp/
 coverage/
+
+# Runtime uploaded files
+uploads/

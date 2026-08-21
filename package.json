@@ -19,7 +19,8 @@
     "test:db": "tsx test_database.ts",
     "test:auth": "tsx test_auth.ts",
     "test:authz": "tsx test_authorization.ts",
-    "test:departments": "tsx test_departments.ts"
+    "test:departments": "tsx test_departments.ts",
+    "test:complaints": "tsx test_complaints.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -39,7 +40,8 @@
     "rbac",
     "authorization",
     "departments",
-    "offices"
+    "offices",
+    "complaints"
   ],
   "author": "CivicSense Team",
   "license": "ISC",

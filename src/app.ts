@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import path from 'path';
 import { config } from './config/env.config.js';
 import { corsOptions } from './config/cors.config.js';
 import { requestLogger } from './middlewares/logging.middleware.js';
@@ -17,7 +18,7 @@ export const createApp = (): Express => {
   }
 
   // Security HTTP headers
-  app.use(helmet());
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
   // Cross-Origin Resource Sharing
   app.use(cors(corsOptions));
@@ -28,6 +29,9 @@ export const createApp = (): Express => {
 
   // HTTP Request Logger
   app.use(requestLogger);
+
+  // Serve static uploaded assets (complaint photos, resolutions)
+  app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
   // Root endpoint info
   app.get('/', (_req: Request, res: Response) => {
