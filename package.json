@@ -17,7 +17,8 @@
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "test:db": "tsx test_database.ts",
-    "test:auth": "tsx test_auth.ts"
+    "test:auth": "tsx test_auth.ts",
+    "test:authz": "tsx test_authorization.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -34,7 +35,8 @@
     "postgresql",
     "auth",
     "jwt",
-    "rbac"
+    "rbac",
+    "authorization"
   ],
   "author": "CivicSense Team",
   "license": "ISC",

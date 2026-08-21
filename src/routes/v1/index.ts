@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authRouter } from '../../modules/auth/auth.route.js';
 import { healthRouter } from './health.route.js';
+import { testRouter } from './test.route.js';
 
 export const v1Router = Router();
 
@@ -9,6 +10,9 @@ v1Router.use('/', healthRouter);
 
 // Authentication Module Endpoints: /api/v1/auth/*
 v1Router.use('/auth', authRouter);
+
+// Diagnostic & Verification Test Endpoints: /api/v1/test/*
+v1Router.use('/test', testRouter);
 
 /**
  * Future Module Mount Points:

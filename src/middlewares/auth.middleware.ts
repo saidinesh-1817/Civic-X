@@ -87,7 +87,9 @@ export const requireRole = (...allowedRoles: Role[]) => {
     if (!allowedRoles.includes(req.user.role)) {
       return next(
         new ForbiddenError(
-          `Access denied. Role "${req.user.role}" is not authorized for this resource. Required: [${allowedRoles.join(', ')}]`
+          `Access denied. Role "${req.user.role}" is not authorized for this resource. Required: [${allowedRoles.join(
+            ', '
+          )}]`
         )
       );
     }
@@ -120,3 +122,17 @@ export const authRateLimiter = rateLimit({
     message: `Too many authentication attempts from this IP, please try again after ${config.rateLimit.windowMinutes} minutes`,
   },
 });
+
+// Re-export authorization middlewares from authorization.middleware.ts for unified access
+export {
+  requireAuthentication,
+  requireRoles,
+  requireCitizen,
+  requireOfficer,
+  requireApprovedOfficer,
+  requireAdmin,
+  requireDepartmentAccess,
+  requireResourceOwner,
+  type DepartmentIdResolver,
+  type OwnerIdResolver,
+} from './authorization.middleware.js';

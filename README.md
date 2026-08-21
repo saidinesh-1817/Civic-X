@@ -1,6 +1,6 @@
 # CivicSense - Backend & Database Infrastructure
 
-CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, and role-based authentication infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
+CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, and department-based authorization infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
 
 ---
 
@@ -15,7 +15,8 @@ civicsense-backend/
 ├── tsconfig.json                 # Strict TypeScript configuration
 ├── test_endpoints.js             # HTTP API base endpoint verification script
 ├── test_database.ts              # Database schema & integrity verification suite
-├── test_auth.ts                  # B3 Authentication & RBAC verification test suite
+├── test_auth.ts                  # B3 Authentication verification test suite
+├── test_authorization.ts         # B4 Authorization & Department Access Control test suite
 ├── README.md                     # Documentation
 ├── prisma/
 │   ├── schema.prisma             # PostgreSQL schema definition & models
@@ -31,20 +32,23 @@ civicsense-backend/
     │   ├── cors.config.ts        # CORS configuration for frontend applications
     │   └── database.ts           # Singleton Prisma Client & connection lifecycle
     ├── middlewares/
-    │   ├── auth.middleware.ts    # JWT authentication, RBAC, and auth rate limiting
+    │   ├── auth.middleware.ts    # Centralized auth & authorization exports
+    │   ├── authorization.middleware.ts # RBAC, department access & resource ownership middlewares
     │   ├── error.middleware.ts   # Centralized 404 and global error handler
     │   ├── logging.middleware.ts # HTTP request logger (colored dev / structured prod)
     │   ├── rateLimiter.middleware.ts # General security rate limiting middleware
     │   └── validate.middleware.ts # Zod-based request validation middleware
     ├── utils/
+    │   ├── authHelpers.ts        # Pure, reusable authorization helpers (department, ownership, roles)
     │   ├── apiResponse.ts        # Standardized success/error JSON response utility
     │   ├── apiError.ts           # Custom operational HTTP error hierarchy
     │   └── logger.ts             # Application logger
     ├── routes/
     │   ├── index.ts              # Root /api aggregator
     │   └── v1/
-    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /health, etc.)
-    │       └── health.route.ts   # Health check route
+    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /health, /test)
+    │       ├── health.route.ts   # Health check route
+    │       └── test.route.ts     # Diagnostic & RBAC/DAC test route
     └── modules/
         ├── auth/                 # B3: Authentication & Role-Based Access Control (RBAC)
         │   ├── auth.controller.ts# Auth HTTP handlers
@@ -61,51 +65,147 @@ civicsense-backend/
 
 ---
 
-## 🔐 Authentication & RBAC (B3: Backend Authentication)
+## 🔒 Authentication vs. Authorization
 
-### 1. Authentication Method
-- **Standard**: Stateless **JWT (JSON Web Tokens)** with Bearer authentication (`Authorization: Bearer <token>`).
-- **Password Security**: Salted hashing with `bcryptjs` (salt rounds: 10). **Zero plaintext passwords** are stored or exposed.
-- **Roles Supported**:
-  - `CITIZEN`: Issue reporting, viewing personal complaints and status updates.
-  - `OFFICER`: Field resolution, updating complaint status, and uploading resolution proof (requires `APPROVED` verification status).
-  - `ADMIN`: System administration, approving officer registrations, and managing departments.
+CivicSense maintains a clear separation between **Authentication (B3)** and **Authorization (B4)**:
 
----
-
-### 2. Authentication API Endpoints (`/api/v1/auth/*`)
-
-| Method | Endpoint | Access | Description |
+| Concept | Layer | Purpose | HTTP Failure |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/register` | Public | Citizen registration with validation, deduplication, and immediate JWT issuance |
-| `POST` | `/api/v1/auth/register/officer` | Public | Field officer registration; creates profile with `PENDING` verification status |
-| `POST` | `/api/v1/auth/login` | Public | Universal login for Citizens, Approved Officers, and Admins |
-| `GET` | `/api/v1/auth/me` | Authenticated | Retrieves current authenticated user profile & department details |
-| `POST` | `/api/v1/auth/logout` | Authenticated | Client-side logout confirmation |
-| `GET` | `/api/v1/auth/test/citizen-only` | `CITIZEN` | Diagnostic route verifying Citizen RBAC authorization |
-| `GET` | `/api/v1/auth/test/officer-only` | `OFFICER` | Diagnostic route verifying Approved Officer RBAC authorization |
-| `GET` | `/api/v1/auth/test/admin-only` | `ADMIN` | Diagnostic route verifying Admin RBAC authorization |
+| **Authentication** | `authenticate`, `requireAuthentication` | **"Who are you?"** Validates JWT bearer tokens, checks token expiry, and resolves the live database user record to `req.user`. | `401 Unauthorized` |
+| **Authorization** | `requireRoles`, `requireCitizen`, `requireOfficer`, `requireAdmin`, `requireDepartmentAccess`, `requireResourceOwner` | **"What are you allowed to do?"** Evaluates whether the authenticated user has permission to access a specific resource or department. | `403 Forbidden` |
 
 ---
 
-### 3. Officer Verification Lifecycle
-- When an officer registers via `/api/v1/auth/register/officer`, their account is created with `role: OFFICER` and `verification_status: PENDING`.
-- **Pending/Rejected Officers cannot log in and cannot access protected officer endpoints.** Login attempts return `403 Forbidden` (`"Officer account is pending administrative approval"`).
-- Only when an administrator approves the officer (`verification_status: APPROVED`) can the officer log in, receive a JWT token, and access officer workflows.
+## 🛡️ Authorization & Department Access Control (B4)
+
+### 1. Role Permissions Matrix
+
+| Role | Permitted Actions | Restricted Actions |
+| :--- | :--- | :--- |
+| `CITIZEN` | • Register & log in immediately<br>• Access personal citizen endpoints<br>• Access and manage own complaints & notifications | • Cannot access officer endpoints (`403 Forbidden`)<br>• Cannot access admin endpoints (`403 Forbidden`)<br>• Cannot access other citizens' private resources |
+| `OFFICER` | • Register account (status: `PENDING`)<br>• Once `APPROVED`, log in and access officer workflows<br>• Access department-specific issues belonging to **their assigned department only** | • `PENDING` or `REJECTED` officers cannot access protected officer endpoints (`403 Forbidden`)<br>• Cannot access resources belonging to other civic departments (`403 Forbidden`)<br>• Cannot access admin endpoints (`403 Forbidden`) |
+| `ADMIN` | • Manage system configuration & users<br>• Approve or reject officer registrations<br>• Super-access: view & manage resources across **all departments** | • N/A (Full platform administrative access) |
 
 ---
 
-### 4. Development & Demo Admin Account
+### 2. Officer Verification Rules
 
-The project includes an administrator account created during database seeding ([`prisma/seed.ts`](file:///C:/Users/pered/.gemini/antigravity/scratch/civicsense-backend/prisma/seed.ts)):
+Every officer account lifecycle follows strict state transitions:
 
-- **Email**: `demo.admin@civicsense.local` (Configurable via `ADMIN_EMAIL` in `.env`)
-- **Password**: `AdminSecure123!` (Configurable via `ADMIN_PASSWORD` in `.env`)
-- **Role**: `ADMIN`
+```
+[Register] ──> PENDING ──┬──> (Admin Approves) ──> APPROVED (Full officer access to assigned department)
+                         └──> (Admin Rejects)  ──> REJECTED (Denied access - 403 Forbidden)
+```
 
-To seed or reset the admin and demo accounts:
+- **Rule 1**: Every officer belongs to **exactly one department** mapped through `officer_profiles.department_id`.
+- **Rule 2**: An officer can access protected officer functionality **ONLY** when `role = OFFICER` **AND** `verification_status = APPROVED`.
+- **Rule 3**: `PENDING` and `REJECTED` officers are denied access (`403 Forbidden`) across all officer endpoints.
+
+---
+
+### 3. Department Access Control Rules & Zero-Trust Security
+
+- **Server-Authoritative Identity**: Permissions, officer department associations, user IDs, and roles are **never trusted from the frontend payload** (request body, headers, or query parameters).
+- **Single Source of Truth**: The authenticated user's database record (`req.user` / `req.user.officer_profile`) is the single source of truth.
+- **Cross-Department Isolation**: An officer assigned to **Municipality / Sanitation** cannot view or modify resources belonging to **Electricity**, **Water Supply**, **Roads & Infrastructure**, or any other department (`403 Forbidden`).
+- **Administrative Override**: Users with role `ADMIN` have administrative access across all departments.
+
+---
+
+### 4. Citizen Resource Ownership
+
+- A citizen can only access resources belonging to their own user account (`req.user.id === resource.citizen_id`).
+- Attempting to access another citizen's resource returns `403 Forbidden`.
+- Platform administrators retain administrative access across resources.
+
+---
+
+### 5. Reusable Middleware & Helper Suite
+
+The authorization layer provides reusable middlewares and utility helpers for all future modules:
+
+#### Middlewares (`src/middlewares/auth.middleware.ts` or `src/middlewares/authorization.middleware.ts`):
+```typescript
+import {
+  requireAuthentication,
+  requireCitizen,
+  requireOfficer,
+  requireApprovedOfficer,
+  requireAdmin,
+  requireRoles,
+  requireDepartmentAccess,
+  requireResourceOwner,
+} from './middlewares/auth.middleware.js';
+
+// Examples:
+router.get('/citizen-data', requireAuthentication, requireCitizen, handler);
+router.get('/admin-dashboard', requireAuthentication, requireAdmin, handler);
+router.get('/staff-only', requireAuthentication, requireRoles(Role.OFFICER, Role.ADMIN), handler);
+router.get('/dept-issues/:departmentId', requireAuthentication, requireDepartmentAccess(), handler);
+router.get('/users/:userId/data', requireAuthentication, requireResourceOwner(), handler);
+```
+
+#### Helper Utilities (`src/utils/authHelpers.ts`):
+```typescript
+import {
+  getAuthenticatedUser,
+  requireApprovedOfficer,
+  checkDepartmentAccess,
+  assertDepartmentAccess,
+  checkResourceOwner,
+  assertResourceOwner,
+} from './utils/authHelpers.js';
+
+// Examples in services/controllers:
+const user = getAuthenticatedUser(req);
+const officerProfile = requireApprovedOfficer(user);
+assertDepartmentAccess(user, targetDepartmentId);
+assertResourceOwner(user, resourceOwnerId);
+```
+
+---
+
+## 🧪 Testing & Verification
+
+### Run the B4 Authorization Test Suite
+Executes unit tests and live HTTP integration tests for all **11 required test cases (A through K + Resource Ownership)**:
+
 ```bash
-npm run db:seed
+npm run test:authz
+```
+
+| Test Case | Scenario | Expected Result |
+| :--- | :--- | :--- |
+| **Test A** | Unauthenticated user → protected endpoint | `401 Unauthorized` |
+| **Test B** | Citizen → citizen endpoint | `200 OK` (Allowed) |
+| **Test C** | Citizen → officer endpoint | `403 Forbidden` |
+| **Test D** | Citizen → admin endpoint | `403 Forbidden` |
+| **Test E** | Approved officer → officer endpoint | `200 OK` (Allowed) |
+| **Test F** | Pending officer → officer endpoint | `403 Forbidden` |
+| **Test G** | Rejected officer → officer endpoint | `403 Forbidden` |
+| **Test H** | Officer → admin endpoint | `403 Forbidden` |
+| **Test I** | Admin → admin endpoint | `200 OK` (Allowed) |
+| **Test J** | Officer from Dept A → protected Dept B resource | `403 Forbidden` (Dept A allowed, Dept B blocked) |
+| **Test K** | Officer attempts to manipulate `department_id` in request | `403 Forbidden` (Database profile is source of truth) |
+| **Test L** | Citizen Resource Ownership & Isolation | `200 OK` for own resource, `403 Forbidden` for other's resource, `200 OK` for Admin |
+
+---
+
+### Run All Test Suites
+
+```bash
+# Run B4 Authorization Tests
+npm run test:authz
+
+# Run B3 Authentication Tests
+npm run test:auth
+
+# Run B1/B2 Database Schema Integrity Checks
+npm run test:db
+
+# Run TypeScript Linting & Build
+npm run lint
+npm run build
 ```
 
 ---
@@ -136,73 +236,4 @@ ADMIN_PASSWORD="AdminSecure123!"
 RATE_LIMIT_WINDOW_MINUTES=15
 RATE_LIMIT_MAX_REQUESTS=100
 AUTH_RATE_LIMIT_MAX_REQUESTS=30
-```
-
----
-
-## 🧪 Testing & Verification
-
-### Run the B3 Authentication Test Suite
-Runs tests covering all test cases (**A through J**):
-```bash
-npm run test:auth
-```
-
-| Test Case | Description | Expected Result |
-| :--- | :--- | :--- |
-| **Test A** | Citizen registration | `201 Created` + JWT token + role `CITIZEN` |
-| **Test B** | Duplicate citizen registration | `409 Conflict` |
-| **Test C** | Citizen login with correct password | `200 OK` + JWT token |
-| **Test D** | Citizen login with wrong password | `401 Unauthorized` |
-| **Test E** | Officer registration | `201 Created` + status `PENDING` |
-| **Test F** | Pending officer login | `403 Forbidden` (Approval required) |
-| **Test G** | Approved officer login | `200 OK` + token & department metadata |
-| **Test H** | `GET /auth/me` with valid token | `200 OK` + safe user profile |
-| **Test I** | `GET /auth/me` without token | `401 Unauthorized` |
-| **Test J** | Wrong role accessing protected endpoint | `403 Forbidden` (RBAC enforced) |
-
-### Run Database Integrity Checks
-```bash
-npm run test:db
-```
-
-### Run TypeScript Checks & Build
-```bash
-npm run lint
-npm run build
-```
-
----
-
-## 📖 Manual API Testing Guide (curl & PowerShell)
-
-### 1. Citizen Registration
-```bash
-# Using curl:
-curl -X POST http://localhost:5000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Jane Citizen",
-    "email": "jane@example.com",
-    "phone": "+91-9876543210",
-    "password": "Password123!"
-  }'
-```
-
-### 2. Citizen / Officer / Admin Login
-```bash
-# Using curl:
-curl -X POST http://localhost:5000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "demo.admin@civicsense.local",
-    "password": "AdminSecure123!"
-  }'
-```
-
-### 3. Get Current User Profile (`/auth/me`)
-```bash
-# Using curl:
-curl http://localhost:5000/api/v1/auth/me \
-  -H "Authorization: Bearer <YOUR_JWT_TOKEN>"
 ```
