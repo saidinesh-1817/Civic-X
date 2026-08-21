@@ -1,14 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import {
-  requireAdmin,
   requireAuthentication,
   requireCitizen,
-  requireDepartmentAccess,
   requireOfficer,
-  requireResourceOwner,
+  requireAdmin,
   requireRoles,
-} from '../../middlewares/auth.middleware.js';
+  requireDepartmentAccess,
+  requireResourceOwner,
+} from '../../middlewares/authorization.middleware.js';
 import { ApiResponse } from '../../utils/apiResponse.js';
 
 export const testRouter = Router();
@@ -18,7 +18,6 @@ export const testRouter = Router();
  * Note: These endpoints are strictly for testing and RBAC/DAC verification.
  */
 
-// General Protected Endpoint: Requires any valid authenticated user
 testRouter.get(
   '/protected',
   requireAuthentication,
@@ -34,7 +33,6 @@ testRouter.get(
   }
 );
 
-// Citizen Protected Endpoint: Requires role = CITIZEN
 testRouter.get(
   '/citizen',
   requireAuthentication,
@@ -51,7 +49,6 @@ testRouter.get(
   }
 );
 
-// Officer Protected Endpoint: Requires role = OFFICER and verification_status = APPROVED
 testRouter.get(
   '/officer',
   requireAuthentication,
@@ -69,7 +66,6 @@ testRouter.get(
   }
 );
 
-// Admin Protected Endpoint: Requires role = ADMIN
 testRouter.get(
   '/admin',
   requireAuthentication,
@@ -86,7 +82,6 @@ testRouter.get(
   }
 );
 
-// Multi-Role Staff Endpoint: Requires role = OFFICER or ADMIN
 testRouter.get(
   '/roles/staff',
   requireAuthentication,
@@ -103,8 +98,6 @@ testRouter.get(
   }
 );
 
-// Department-Scoped Resource (via URL parameter):
-// Enforces that only officers belonging to :departmentId (or Admins) can access
 testRouter.get(
   '/department/:departmentId',
   requireAuthentication,
@@ -123,8 +116,6 @@ testRouter.get(
   }
 );
 
-// Department-Scoped Resource (via Request Body):
-// Verifies that authorization checks against server-side session, ignoring spoofed parameters
 testRouter.post(
   '/department-body',
   requireAuthentication,
@@ -133,7 +124,7 @@ testRouter.post(
     ApiResponse.success(
       res,
       {
-        message: `Access granted to department resource via body validation`,
+        message: 'Access granted to department resource via body validation',
         targetDepartmentId: req.body?.department_id,
         userDepartmentId: req.user?.officer_profile?.department_id,
       },
@@ -142,8 +133,6 @@ testRouter.post(
   }
 );
 
-// Citizen Resource Ownership Endpoint:
-// Enforces that a citizen can only access resources with matching :userId (or Admins)
 testRouter.get(
   '/owner/:userId',
   requireAuthentication,
