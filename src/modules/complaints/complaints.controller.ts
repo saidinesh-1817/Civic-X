@@ -21,4 +21,40 @@ export class ComplaintsController {
       next(error);
     }
   };
+
+  /**
+   * GET /api/v1/complaints/my
+   * Retrieve complaints submitted by the authenticated citizen
+   */
+  public static getMyComplaints = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const citizen = getAuthenticatedUser(req);
+      const result = await ComplaintsService.getMyComplaints(citizen, req.query as any);
+      ApiResponse.success(res, result, 'Citizen complaints retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/v1/complaints/:complaintId
+   * Retrieve detailed complaint view with status history and resolution
+   */
+  public static getComplaintById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const user = getAuthenticatedUser(req);
+      const complaint = await ComplaintsService.getComplaintById(user, req.params.complaintId);
+      ApiResponse.success(res, complaint, 'Complaint details retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
 }

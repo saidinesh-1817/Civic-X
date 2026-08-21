@@ -1,6 +1,6 @@
 # CivicSense - Backend & Database Infrastructure
 
-CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, department/office management, and complaint creation infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
+CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, department/office management, complaint creation, and citizen complaint tracking infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
 
 ---
 
@@ -19,6 +19,7 @@ civicsense-backend/
 ├── test_authorization.ts         # B4 Authorization & Department Access Control test suite
 ├── test_departments.ts           # B5 Department & Office Management test suite
 ├── test_complaints.ts            # B6 Complaint Creation & Submission test suite
+├── test_complaint_retrieval.ts   # B7 Complaint Retrieval & Citizen Tracking test suite
 ├── README.md                     # Documentation
 ├── prisma/
 │   ├── schema.prisma             # PostgreSQL schema definition & models
@@ -64,10 +65,10 @@ civicsense-backend/
         │   ├── departments.service.ts    # Business logic & Haversine nearest-office locator
         │   ├── departments.schema.ts     # Zod input & coordinate validation schemas
         │   └── departments.route.ts      # /api/v1/departments & /api/v1/offices router definitions
-        ├── complaints/           # B6: Complaint Creation & Submission
+        ├── complaints/           # B6 & B7: Complaint Creation, Retrieval & Citizen Tracking
         │   ├── complaints.controller.ts  # Complaint HTTP handlers
         │   ├── complaints.service.ts     # Complaint lifecycle, auto-routing & tracking logic
-        │   ├── complaints.schema.ts      # Zod complaint submission schemas
+        │   ├── complaints.schema.ts      # Zod complaint submission & query schemas
         │   └── complaints.route.ts       # /api/v1/complaints router definitions
         ├── users/                # Future: Citizen profiles & preferences
         ├── notifications/        # Future: Multi-channel notifications (Push, SMS, Email)
@@ -77,131 +78,179 @@ civicsense-backend/
 
 ---
 
-## 📝 Complaint Creation & Submission (B6)
+## 🔍 Complaint Retrieval & Citizen Tracking (B7)
 
-### 1. Complaint Submission Flow
-
-```
-[Authenticated Citizen]
-       │
-       ▼  POST /api/v1/complaints (with title, description, department_id, GPS, photo)
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 1. Validate Citizen Session (req.user.id, role = CITIZEN)                   │
-│ 2. Validate Department (active = true)                                      │
-│ 3. Validate & Store Photo (Magic byte inspection, safe unique filename)     │
-│ 4. Automatic Spatial Routing: Haversine distance -> nearest department office│
-│ 5. Atomic DB Transaction:                                                   │
-│    • Complaint created with default status = 'NEW', priority = 'MEDIUM'     │
-│    • Initial ComplaintStatusHistory created (changed_by = citizen.id)       │
-│ 6. Generate human-readable identifier (CIV-######)                          │
-└─────────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼  201 Created
-[Safe Formatted Complaint Response with tracking number]
-```
-
----
-
-### 2. Endpoints Specification
+### 1. Endpoints Specification
 
 | Method | Endpoint | Authorization | Description |
 | :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/complaints/my` | `CITIZEN` | Retrieves paginated complaints submitted by the authenticated citizen with optional filters. |
 | `POST` | `/api/v1/complaints` | `CITIZEN` | Submit a new civic issue report. |
+| `GET` | `/api/v1/complaints/:complaintId` | `CITIZEN` (Owner) / `ADMIN` | Retrieves detailed single complaint metadata, full chronological status history, and resolution info. |
 
-#### Request Body (`application/json`):
-```json
-{
-  "title": "Overflowing Garbage Bin on 4th Cross",
-  "description": "Community garbage bin has not been cleared for 3 days and is overflowing onto the street.",
-  "department_id": "11111111-1111-1111-1111-111111111111",
-  "latitude": 12.9810,
-  "longitude": 77.6320,
-  "photo": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ..."
-}
+---
+
+### 2. Citizen Complaint List (`GET /api/v1/complaints/my`)
+
+#### Query Parameters:
+- `page` (integer, optional, default: 1): Page number ($\ge 1$).
+- `limit` (integer, optional, default: 10, max: 50): Number of records per page.
+- `status` (enum, optional): Filter by `NEW`, `ASSIGNED`, `IN_PROGRESS`, or `RESOLVED`.
+- `department_id` (UUID, optional): Filter by specific department.
+
+#### Example Request:
+```bash
+GET /api/v1/complaints/my?page=1&limit=10&status=NEW HTTP/1.1
+Host: localhost:5000
+Authorization: Bearer <CITIZEN_JWT_TOKEN>
 ```
 
-#### Successful Response (`201 Created`):
+#### Example Response (`200 OK`):
 ```json
 {
   "success": true,
-  "message": "Complaint registered successfully",
+  "message": "Citizen complaints retrieved successfully",
   "data": {
-    "id": "c0000000-0000-0000-0000-000000000001",
-    "complaint_number": "CIV-100001",
-    "title": "Overflowing Garbage Bin on 4th Cross",
-    "description": "Community garbage bin has not been cleared for 3 days and is overflowing onto the street.",
-    "photo_url": "/uploads/complaints/complaints_1787305809782_3a8ecb7a32f69dba.png",
-    "latitude": 12.981,
-    "longitude": 77.632,
-    "priority": "MEDIUM",
-    "status": "NEW",
-    "department": {
-      "id": "11111111-1111-1111-1111-111111111111",
-      "name": "Municipality / Sanitation",
-      "description": "Solid waste management & sanitation"
-    },
-    "office": {
-      "id": "aaaa2222-2222-2222-2222-222222222222",
-      "name": "East Ward Sanitation Office",
-      "address": "Building B, Indiranagar East",
-      "latitude": 12.981,
-      "longitude": 77.632
-    },
-    "citizen": {
-      "id": "user-cit-1111",
-      "name": "Jane Citizen",
-      "email": "jane.citizen@civicsense.local"
-    },
-    "created_at": "2026-08-21T09:50:09.000Z"
+    "complaints": [
+      {
+        "id": "c1111111-1111-1111-1111-111111111111",
+        "complaint_number": "CIV-100001",
+        "title": "Pothole on Main St",
+        "department": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "name": "Municipality / Sanitation"
+        },
+        "office": {
+          "id": "aaaa1111-1111-1111-1111-111111111111",
+          "name": "Central Office",
+          "address": "Plot 101, Central Zone"
+        },
+        "photo_url": "/uploads/complaints/complaints_1787305809782_3a8ecb7a32f69dba.png",
+        "priority": "HIGH",
+        "status": "NEW",
+        "created_at": "2026-08-21T09:50:09.000Z",
+        "updated_at": "2026-08-21T09:50:09.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 1,
+      "total_pages": 1
+    }
   }
 }
 ```
 
 ---
 
-### 3. Security & Anti-Spoofing Guarantees
+### 3. Single Complaint Details (`GET /api/v1/complaints/:complaintId`)
 
-1. **`citizen_id` Zero Trust**: Sourced strictly from authenticated session token (`req.user.id`). Client attempts to submit `citizen_id` are completely ignored.
-2. **Lifecycle Defaults**: `status` is hardcoded to `NEW`; `priority` is hardcoded to `MEDIUM`. Frontend attempts to submit spoofed status or priority values are stripped.
-3. **Role Enforcement**: Only users with `role = CITIZEN` can create complaints (`403 Forbidden` for Officers or unapproved accounts).
-4. **Photo Validation**: Image uploads are inspected for valid magic bytes (`JPEG`, `PNG`, `WEBP`, `GIF`) to prevent file-type spoofing or executable payload uploads. Size is capped at 5 MB.
-5. **Geographic Boundaries**: Latitudes outside \([-90, 90]\) and longitudes outside \([-180, 180]\) are rejected with `422 ValidationError`.
+#### Example Request:
+```bash
+GET /api/v1/complaints/c1111111-1111-1111-1111-111111111111 HTTP/1.1
+Host: localhost:5000
+Authorization: Bearer <CITIZEN_JWT_TOKEN>
+```
+
+#### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Complaint details retrieved successfully",
+  "data": {
+    "id": "c1111111-1111-1111-1111-111111111111",
+    "complaint_number": "CIV-100001",
+    "title": "Pothole on Main St",
+    "description": "Deep dangerous pothole near junction.",
+    "photo_url": "/uploads/complaints/pothole1.jpg",
+    "latitude": 12.9716,
+    "longitude": 77.5946,
+    "priority": "HIGH",
+    "status": "RESOLVED",
+    "department": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Municipality / Sanitation",
+      "description": "Sanitation"
+    },
+    "office": {
+      "id": "aaaa1111-1111-1111-1111-111111111111",
+      "name": "Central Office",
+      "address": "Plot 101",
+      "latitude": 12.97,
+      "longitude": 77.59
+    },
+    "citizen": {
+      "id": "user-citizen-a",
+      "name": "Aarav Sharma",
+      "email": "aarav.sharma@civicsense.local"
+    },
+    "created_at": "2026-08-10T10:00:00.000Z",
+    "updated_at": "2026-08-12T15:00:00.000Z",
+    "status_history": [
+      {
+        "id": "sh-1",
+        "status": "NEW",
+        "note": "Registered by citizen",
+        "created_at": "2026-08-10T10:00:00.000Z"
+      },
+      {
+        "id": "sh-2",
+        "status": "ASSIGNED",
+        "note": "Assigned to crew",
+        "created_at": "2026-08-11T09:00:00.000Z"
+      },
+      {
+        "id": "sh-3",
+        "status": "RESOLVED",
+        "note": "Pothole filled and cured",
+        "created_at": "2026-08-12T15:00:00.000Z"
+      }
+    ],
+    "resolution": {
+      "id": "res-1",
+      "photo_url": "/uploads/resolutions/pothole_fixed.jpg",
+      "note": "Road patch complete with bitumen.",
+      "resolved_at": "2026-08-12T15:00:00.000Z",
+      "created_at": "2026-08-12T15:00:00.000Z"
+    }
+  }
+}
+```
 
 ---
 
 ## 🧪 Testing & Verification
 
-### Run the B6 Complaint Creation Test Suite
+### Run the B7 Complaint Retrieval Test Suite
 ```bash
-npm run test:complaints
+npm run test:retrieval
 ```
 
 | Test ID | Scenario | Expected Result |
 | :--- | :--- | :--- |
-| **S1** | Photo storage & unique filename generation | Safe URL reference generated under `/uploads/complaints/` |
-| **S2** | Reject spoofed / malicious image headers | `400 BadRequestError` |
-| **S3** | Deterministic human-readable identifier format | `CIV-######` format verified |
-| **Test A** | Authenticated citizen submits valid complaint | `201 Created` |
-| **Test B** | Citizen submits valid photo | Photo stored & referenced in `photo_url` |
-| **Test C** | Citizen submits GPS coordinates | Geolocation persisted |
-| **Test D** | Department selection | Correct department association stored |
-| **Test E** | Nearest office exists | `office_id` automatically resolved via Haversine and stored |
-| **Test F** | Department without active offices | Complaint created with `office_id = null` |
-| **Test G** | Unauthenticated user | `401 Unauthorized` |
-| **Test H** | Officer attempts to create citizen complaint | `403 Forbidden` |
-| **Test I** | Inactive or non-existent department | `404 Not Found` |
-| **Test J** | Out-of-bounds latitude/longitude | `422 ValidationError` |
-| **Test K** | Invalid / corrupt image data | `400 BadRequestError` |
-| **Test L** | Client attempts to inject `citizen_id`, `priority`, or `status` | Ignored; server session and defaults enforced |
-| **Test M** | Initial complaint status | Hardcoded to `NEW` |
-| **Test N** | Initial `ComplaintStatusHistory` record | Logged with `status = NEW` & `changed_by = citizen.id` |
-| **Test O** | Unique `CIV-...` human-readable complaint ID | Generated and exposed in API response |
+| **Test A** | Citizen retrieves own complaints list | `200 OK` + formatted complaints array |
+| **Test B** | Citizen retrieves single complaint details | `200 OK` + timeline + resolution info |
+| **Test C** | Citizen attempts to retrieve another citizen's complaint | `403 Forbidden` |
+| **Test D** | Unauthenticated request to `/my` or `/:complaintId` | `401 Unauthorized` |
+| **Test E** | Officer attempting to access `/my` as a citizen | `403 Forbidden` |
+| **Test F** | Citizen supplies spoofed `citizen_id` query param | Ignored; returns only own complaints |
+| **Test G** | Pagination behavior (`page`, `limit`) | Accurate `page`, `limit`, `total`, `total_pages` |
+| **Test H** | Filter by status (`?status=...`) | Isolates matching records within citizen's complaints |
+| **Test I** | Filter by department (`?department_id=...`) | Isolates matching department records |
+| **Test J** | Unresolved complaint resolution value | Returns `resolution: null` |
+| **Test K** | Invalid `complaintId` UUID | `422 ValidationError` |
+| **Test L** | Non-existent complaint UUID | `404 Not Found` |
+| **Test M** | Invalid status filter in query parameter | `422 ValidationError` |
 
 ---
 
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B7 Complaint Retrieval Tests
+npm run test:retrieval
+
 # Run B6 Complaint Creation Tests
 npm run test:complaints
 

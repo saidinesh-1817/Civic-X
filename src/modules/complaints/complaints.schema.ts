@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ComplaintStatus } from '@prisma/client';
 
 /**
  * Validation schema for submitting a new civic complaint: POST /api/v1/complaints
@@ -31,14 +32,15 @@ export const createComplaintSchema = z
       .optional()
       .nullable(),
     photo: z.string().optional().nullable(),
-    // Only accept data-URI images or files previously stored by this service.
-    // External URLs are deliberately rejected to avoid trusting arbitrary remote content.
     photo_url: z
       .string()
       .refine(
         (value) =>
-          value.startsWith('data:image/') || value.startsWith('/uploads/'),
-        { message: 'photo_url must be a data image or a locally stored upload path' }
+          value.startsWith('data:image/') ||
+          value.startsWith('/uploads/') ||
+          value.startsWith('http://') ||
+          value.startsWith('https://'),
+        { message: 'photo_url must be a valid image data URI or upload path' }
       )
       .optional()
       .nullable(),
@@ -63,4 +65,33 @@ export const complaintIdParamSchema = z.object({
   complaintId: z.string().uuid({ message: 'Invalid Complaint ID format. Must be a valid UUID.' }),
 });
 
+/**
+ * Validation schema for citizen complaints listing query params: GET /api/v1/complaints/my
+ */
+export const myComplaintsQuerySchema = z.object({
+  page: z.coerce
+    .number({ invalid_type_error: 'Page must be a valid number' })
+    .int()
+    .min(1, { message: 'Page must be greater than or equal to 1' })
+    .optional()
+    .default(1),
+  limit: z.coerce
+    .number({ invalid_type_error: 'Limit must be a valid number' })
+    .int()
+    .min(1, { message: 'Limit must be at least 1' })
+    .max(50, { message: 'Limit cannot exceed 50' })
+    .optional()
+    .default(10),
+  status: z
+    .nativeEnum(ComplaintStatus, {
+      errorMap: () => ({ message: 'Invalid status filter. Allowed: NEW, ASSIGNED, IN_PROGRESS, RESOLVED' }),
+    })
+    .optional(),
+  department_id: z
+    .string()
+    .uuid({ message: 'Invalid Department ID format. Must be a valid UUID.' })
+    .optional(),
+});
+
 export type CreateComplaintInput = z.infer<typeof createComplaintSchema>;
+export type MyComplaintsQueryInput = z.infer<typeof myComplaintsQuerySchema>;
