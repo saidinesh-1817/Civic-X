@@ -1,6 +1,6 @@
 # CivicSense - Backend & Database Infrastructure
 
-CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, department/office management, complaint creation, and citizen complaint tracking infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
+CivicSense is a modern civic issue reporting and resolution platform. This repository contains the backend API foundation, relational database, role-based authentication, department-based authorization, department/office management, complaint creation, citizen complaint tracking, and officer complaint management infrastructure built with **Node.js**, **Express**, **TypeScript**, **PostgreSQL**, and **Prisma ORM**.
 
 ---
 
@@ -20,6 +20,7 @@ civicsense-backend/
 ├── test_departments.ts           # B5 Department & Office Management test suite
 ├── test_complaints.ts            # B6 Complaint Creation & Submission test suite
 ├── test_complaint_retrieval.ts   # B7 Complaint Retrieval & Citizen Tracking test suite
+├── test_officer_complaints.ts    # B8 Officer Complaint Management test suite
 ├── README.md                     # Documentation
 ├── prisma/
 │   ├── schema.prisma             # PostgreSQL schema definition & models
@@ -51,7 +52,7 @@ civicsense-backend/
     ├── routes/
     │   ├── index.ts              # Root /api aggregator
     │   └── v1/
-    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /departments, /offices, /complaints, /test)
+    │       ├── index.ts          # Versioned /api/v1 router (mounts /auth, /departments, /offices, /complaints, /officer, /test)
     │       ├── health.route.ts   # Health check route
     │       └── test.route.ts     # Diagnostic & RBAC/DAC test route
     └── modules/
@@ -70,66 +71,76 @@ civicsense-backend/
         │   ├── complaints.service.ts     # Complaint lifecycle, auto-routing & tracking logic
         │   ├── complaints.schema.ts      # Zod complaint submission & query schemas
         │   └── complaints.route.ts       # /api/v1/complaints router definitions
+        ├── officers/             # B8: Officer Complaint Management & Processing
+        │   ├── officers.controller.ts    # Officer queue & assignment HTTP handlers
+        │   ├── officers.service.ts       # Department queue, boundaries & assignment logic
+        │   ├── officers.schema.ts        # Zod input & query validation schemas
+        │   └── officers.route.ts         # /api/v1/officer router definitions
         ├── users/                # Future: Citizen profiles & preferences
         ├── notifications/        # Future: Multi-channel notifications (Push, SMS, Email)
-        ├── officers/             # Future: Field officer assignments & management
         └── administration/       # Future: Administrative controls, wards & metrics
 ```
 
 ---
 
-## 🔍 Complaint Retrieval & Citizen Tracking (B7)
+## 👮 Officer Complaint Management (B8)
 
 ### 1. Endpoints Specification
 
 | Method | Endpoint | Authorization | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/complaints/my` | `CITIZEN` | Retrieves paginated complaints submitted by the authenticated citizen with optional filters. |
-| `POST` | `/api/v1/complaints` | `CITIZEN` | Submit a new civic issue report. |
-| `GET` | `/api/v1/complaints/:complaintId` | `CITIZEN` (Owner) / `ADMIN` | Retrieves detailed single complaint metadata, full chronological status history, and resolution info. |
+| `GET` | `/api/v1/officer/complaints` | `APPROVED OFFICER` | Lists complaints assigned to the officer's department with filters and pagination. |
+| `GET` | `/api/v1/officer/complaints/:complaintId` | `APPROVED OFFICER` | Retrieves complaint details, location, status timeline, and assignment history within the officer's department. |
+| `POST` | `/api/v1/officer/complaints/:complaintId/assign` | `APPROVED OFFICER` | Accepts and assigns a `NEW` complaint to the authenticated officer (`NEW` $\rightarrow$ `ASSIGNED`). |
 
 ---
 
-### 2. Citizen Complaint List (`GET /api/v1/complaints/my`)
+### 2. Officer Complaint List (`GET /api/v1/officer/complaints`)
 
 #### Query Parameters:
 - `page` (integer, optional, default: 1): Page number ($\ge 1$).
 - `limit` (integer, optional, default: 10, max: 50): Number of records per page.
-- `status` (enum, optional): Filter by `NEW`, `ASSIGNED`, `IN_PROGRESS`, or `RESOLVED`.
-- `department_id` (UUID, optional): Filter by specific department.
+- `status` (enum, optional): `NEW`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`.
+- `priority` (enum, optional): `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+- `office_id` (UUID, optional): Filter by department branch office.
+- `from_date` / `to_date` (ISO Datetime, optional): Date range filter.
 
 #### Example Request:
 ```bash
-GET /api/v1/complaints/my?page=1&limit=10&status=NEW HTTP/1.1
+GET /api/v1/officer/complaints?status=NEW&priority=HIGH HTTP/1.1
 Host: localhost:5000
-Authorization: Bearer <CITIZEN_JWT_TOKEN>
+Authorization: Bearer <APPROVED_OFFICER_JWT>
 ```
 
 #### Example Response (`200 OK`):
 ```json
 {
   "success": true,
-  "message": "Citizen complaints retrieved successfully",
+  "message": "Department complaints retrieved successfully",
   "data": {
     "complaints": [
       {
         "id": "c1111111-1111-1111-1111-111111111111",
         "complaint_number": "CIV-100001",
-        "title": "Pothole on Main St",
+        "title": "Garbage Dump Overflow",
+        "description": "Solid waste uncollected for 3 days.",
+        "photo_url": "/uploads/complaints/garbage.jpg",
+        "latitude": 12.981,
+        "longitude": 77.632,
+        "priority": "HIGH",
+        "status": "NEW",
         "department": {
           "id": "11111111-1111-1111-1111-111111111111",
           "name": "Municipality / Sanitation"
         },
         "office": {
-          "id": "aaaa1111-1111-1111-1111-111111111111",
-          "name": "Central Office",
-          "address": "Plot 101, Central Zone"
+          "id": "aaaa2222-2222-2222-2222-222222222222",
+          "name": "East Ward Sanitation Office",
+          "address": "Building B, Indiranagar"
         },
-        "photo_url": "/uploads/complaints/complaints_1787305809782_3a8ecb7a32f69dba.png",
-        "priority": "HIGH",
-        "status": "NEW",
-        "created_at": "2026-08-21T09:50:09.000Z",
-        "updated_at": "2026-08-21T09:50:09.000Z"
+        "created_at": "2026-08-18T10:00:00.000Z",
+        "updated_at": "2026-08-18T10:00:00.000Z",
+        "assignment": null
       }
     ],
     "pagination": {
@@ -144,76 +155,54 @@ Authorization: Bearer <CITIZEN_JWT_TOKEN>
 
 ---
 
-### 3. Single Complaint Details (`GET /api/v1/complaints/:complaintId`)
+### 3. Accept & Assign Complaint (`POST /api/v1/officer/complaints/:complaintId/assign`)
 
-#### Example Request:
-```bash
-GET /api/v1/complaints/c1111111-1111-1111-1111-111111111111 HTTP/1.1
-Host: localhost:5000
-Authorization: Bearer <CITIZEN_JWT_TOKEN>
+#### Request Body (`application/json`):
+```json
+{
+  "action": "ACCEPT",
+  "note": "Officer taking ownership for field inspection."
+}
 ```
+
+#### Transition Rules:
+- **Valid Transition**: `NEW` $\rightarrow$ `ASSIGNED`.
+- **Invalid Transitions**: Attempting to accept a complaint that is already `ASSIGNED`, `IN_PROGRESS`, or `RESOLVED` returns `400 BadRequestError`.
+- **Department Boundary**: Attempting to accept a complaint from another department returns `403 Forbidden`.
 
 #### Example Response (`200 OK`):
 ```json
 {
   "success": true,
-  "message": "Complaint details retrieved successfully",
+  "message": "Complaint accepted and assigned successfully",
   "data": {
     "id": "c1111111-1111-1111-1111-111111111111",
     "complaint_number": "CIV-100001",
-    "title": "Pothole on Main St",
-    "description": "Deep dangerous pothole near junction.",
-    "photo_url": "/uploads/complaints/pothole1.jpg",
-    "latitude": 12.9716,
-    "longitude": 77.5946,
-    "priority": "HIGH",
-    "status": "RESOLVED",
-    "department": {
-      "id": "11111111-1111-1111-1111-111111111111",
-      "name": "Municipality / Sanitation",
-      "description": "Sanitation"
-    },
-    "office": {
-      "id": "aaaa1111-1111-1111-1111-111111111111",
-      "name": "Central Office",
-      "address": "Plot 101",
-      "latitude": 12.97,
-      "longitude": 77.59
-    },
-    "citizen": {
-      "id": "user-citizen-a",
-      "name": "Aarav Sharma",
-      "email": "aarav.sharma@civicsense.local"
-    },
-    "created_at": "2026-08-10T10:00:00.000Z",
-    "updated_at": "2026-08-12T15:00:00.000Z",
+    "title": "Garbage Dump Overflow",
+    "status": "ASSIGNED",
+    "assignments": [
+      {
+        "id": "asgn-1",
+        "officer_id": "prof-off-sanitation-1",
+        "officer_name": "Inspector Ramesh",
+        "designation": "Sanitation Chief Inspector",
+        "assigned_at": "2026-08-21T10:16:52.000Z"
+      }
+    ],
     "status_history": [
       {
         "id": "sh-1",
         "status": "NEW",
-        "note": "Registered by citizen",
-        "created_at": "2026-08-10T10:00:00.000Z"
+        "note": "Registered by citizen.",
+        "created_at": "2026-08-18T10:00:00.000Z"
       },
       {
         "id": "sh-2",
         "status": "ASSIGNED",
-        "note": "Assigned to crew",
-        "created_at": "2026-08-11T09:00:00.000Z"
-      },
-      {
-        "id": "sh-3",
-        "status": "RESOLVED",
-        "note": "Pothole filled and cured",
-        "created_at": "2026-08-12T15:00:00.000Z"
+        "note": "Officer taking ownership for field inspection.",
+        "created_at": "2026-08-21T10:16:52.000Z"
       }
-    ],
-    "resolution": {
-      "id": "res-1",
-      "photo_url": "/uploads/resolutions/pothole_fixed.jpg",
-      "note": "Road patch complete with bitumen.",
-      "resolved_at": "2026-08-12T15:00:00.000Z",
-      "created_at": "2026-08-12T15:00:00.000Z"
-    }
+    ]
   }
 }
 ```
@@ -222,32 +211,35 @@ Authorization: Bearer <CITIZEN_JWT_TOKEN>
 
 ## 🧪 Testing & Verification
 
-### Run the B7 Complaint Retrieval Test Suite
+### Run the B8 Officer Complaint Test Suite
 ```bash
-npm run test:retrieval
+npm run test:officers
 ```
 
 | Test ID | Scenario | Expected Result |
 | :--- | :--- | :--- |
-| **Test A** | Citizen retrieves own complaints list | `200 OK` + formatted complaints array |
-| **Test B** | Citizen retrieves single complaint details | `200 OK` + timeline + resolution info |
-| **Test C** | Citizen attempts to retrieve another citizen's complaint | `403 Forbidden` |
-| **Test D** | Unauthenticated request to `/my` or `/:complaintId` | `401 Unauthorized` |
-| **Test E** | Officer attempting to access `/my` as a citizen | `403 Forbidden` |
-| **Test F** | Citizen supplies spoofed `citizen_id` query param | Ignored; returns only own complaints |
-| **Test G** | Pagination behavior (`page`, `limit`) | Accurate `page`, `limit`, `total`, `total_pages` |
-| **Test H** | Filter by status (`?status=...`) | Isolates matching records within citizen's complaints |
-| **Test I** | Filter by department (`?department_id=...`) | Isolates matching department records |
-| **Test J** | Unresolved complaint resolution value | Returns `resolution: null` |
-| **Test K** | Invalid `complaintId` UUID | `422 ValidationError` |
-| **Test L** | Non-existent complaint UUID | `404 Not Found` |
-| **Test M** | Invalid status filter in query parameter | `422 ValidationError` |
+| **Test A** | Approved Municipality officer lists Municipality complaints | `200 OK` + department complaints list |
+| **Test B** | Query param injection (`?department_id=...`) to access other departments | Ignored; strictly scoped to officer department |
+| **Test C** | Approved officer opens own department complaint | `200 OK` + complete timeline + assignment info |
+| **Test D** | Officer opens another department's complaint | `403 Forbidden` |
+| **Test E** | Officer accepts NEW complaint | `200 OK` + updated complaint |
+| **Test F** | Complaint status transition | Transitions `NEW` $\rightarrow$ `ASSIGNED` |
+| **Test G** | `ComplaintAssignment` record | Created with authentic `officer_id` and `assigned_by` |
+| **Test H** | `ComplaintStatusHistory` record | Logged with `status = ASSIGNED` and officer note |
+| **Test I** | Citizen tries officer endpoint | `403 Forbidden` |
+| **Test J** | Pending / Rejected officer tries officer endpoint | `403 Forbidden` |
+| **Test K** | Officer tries to spoof `officer_id` in request body | Ignored; authentic server-side identity used |
+| **Test L** | Officer attempts to accept an already ASSIGNED complaint | `400 BadRequestError` |
+| **Test M** | Filtering by `priority`, `status`, and `office_id` | Accurate results within department boundaries |
 
 ---
 
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B8 Officer Complaint Management Tests
+npm run test:officers
+
 # Run B7 Complaint Retrieval Tests
 npm run test:retrieval
 

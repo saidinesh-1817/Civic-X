@@ -21,7 +21,8 @@
     "test:authz": "tsx test_authorization.ts",
     "test:departments": "tsx test_departments.ts",
     "test:complaints": "tsx test_complaints.ts",
-    "test:retrieval": "tsx test_complaint_retrieval.ts"
+    "test:retrieval": "tsx test_complaint_retrieval.ts",
+    "test:officers": "tsx test_officer_complaints.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -43,7 +44,8 @@
     "departments",
     "offices",
     "complaints",
-    "tracking"
+    "tracking",
+    "officers"
   ],
   "author": "CivicSense Team",
   "license": "ISC",
