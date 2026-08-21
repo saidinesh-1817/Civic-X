@@ -31,7 +31,17 @@ export const createComplaintSchema = z
       .optional()
       .nullable(),
     photo: z.string().optional().nullable(),
-    photo_url: z.string().optional().nullable(),
+    // Only accept data-URI images or files previously stored by this service.
+    // External URLs are deliberately rejected to avoid trusting arbitrary remote content.
+    photo_url: z
+      .string()
+      .refine(
+        (value) =>
+          value.startsWith('data:image/') || value.startsWith('/uploads/'),
+        { message: 'photo_url must be a data image or a locally stored upload path' }
+      )
+      .optional()
+      .nullable(),
   })
   .refine(
     (data) => {
