@@ -34,14 +34,19 @@ const parseCorsOrigin = (originValue?: string): string | string[] => {
 const nodeEnv = (process.env.NODE_ENV || 'development') as 'development' | 'production' | 'test';
 
 const jwtSecret = process.env.JWT_SECRET;
-if (!jwtSecret && nodeEnv === 'production') {
-  throw new Error('JWT_SECRET environment variable is required in production');
-}
-
+const databaseUrl = process.env.DATABASE_URL;
 const adminEmail = process.env.ADMIN_EMAIL;
 const adminPassword = process.env.ADMIN_PASSWORD;
-if (nodeEnv === 'production' && (!adminEmail || !adminPassword)) {
-  throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required in production');
+
+if (nodeEnv === 'production') {
+  const missing: string[] = [];
+  if (!jwtSecret) missing.push('JWT_SECRET');
+  if (!databaseUrl) missing.push('DATABASE_URL');
+  if (!adminEmail) missing.push('ADMIN_EMAIL');
+  if (!adminPassword) missing.push('ADMIN_PASSWORD');
+  if (missing.length > 0) {
+    throw new Error(`Required production environment variables are missing: ${missing.join(', ')}`);
+  }
 }
 
 export const config: AppConfig = {
@@ -52,9 +57,7 @@ export const config: AppConfig = {
   port: parseInt(process.env.PORT || '5000', 10),
   apiPrefix: process.env.API_PREFIX || '/api',
   corsOrigin: parseCorsOrigin(process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:5173'),
-  databaseUrl:
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:postgres@localhost:5432/civicsense?schema=public',
+  databaseUrl: databaseUrl || 'postgresql://postgres:postgres@localhost:5432/civicsense?schema=public',
   // Development/test fallback is intentionally non-production only.
   jwtSecret: jwtSecret || 'civicsense_dev_only_jwt_secret_change_me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
