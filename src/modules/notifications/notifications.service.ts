@@ -10,6 +10,7 @@ export enum NotificationType {
   STATUS_CHANGED = 'STATUS_CHANGED',
   COMPLAINT_RESOLVED = 'COMPLAINT_RESOLVED',
   OFFICER_APPROVED = 'OFFICER_APPROVED',
+  OFFICER_REJECTED = 'OFFICER_REJECTED',
 }
 
 export interface CreateNotificationParams {
@@ -218,7 +219,7 @@ export class NotificationsService {
   }
 
   /**
-   * Trigger: When an admin approves an officer account (Prepared for B11)
+   * Trigger: When an admin approves an officer account
    */
   public static async notifyOfficerApproved(
     officerUserId: string,
@@ -231,6 +232,27 @@ export class NotificationsService {
         title: 'Officer Account Approved',
         message: 'Your officer profile has been approved. You now have full access to department complaints.',
         type: NotificationType.OFFICER_APPROVED,
+      },
+      dbClient
+    );
+  }
+
+  /**
+   * Trigger: When an admin rejects an officer account
+   */
+  public static async notifyOfficerRejected(
+    officerUserId: string,
+    reason?: string,
+    dbClient: DbClient = prisma
+  ): Promise<void> {
+    const reasonMsg = reason ? ` Reason: ${reason}` : '';
+    await this.createNotification(
+      {
+        recipient_user_id: officerUserId,
+        complaint_id: null,
+        title: 'Officer Verification Rejected',
+        message: `Your officer profile verification was rejected.${reasonMsg}`,
+        type: NotificationType.OFFICER_REJECTED,
       },
       dbClient
     );

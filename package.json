@@ -24,7 +24,8 @@
     "test:retrieval": "tsx test_complaint_retrieval.ts",
     "test:officers": "tsx test_officer_complaints.ts",
     "test:workflow": "tsx test_status_workflow.ts",
-    "test:notifications": "tsx test_notifications.ts"
+    "test:notifications": "tsx test_notifications.ts",
+    "test:admin": "tsx test_admin.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

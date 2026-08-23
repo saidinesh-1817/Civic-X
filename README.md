@@ -538,9 +538,233 @@ npm run test:notifications
 
 ---
 
+---
+
+## 🛡️ Admin & Officer Verification Management (B11)
+
+### 1. Overview & Verification Lifecycle
+
+Platform Administrators manage officer registrations, verify designations, assign municipal departments, and control access to department-scoped complaints.
+
+```
+Officer Registers (Auth)
+           │
+           ▼
+   [ PENDING Status ] ──(Cannot access officer endpoints: 403 Forbidden)
+           │
+     Admin Reviews (`GET /api/v1/admin/officers`)
+           │
+     Admin Sets Department (`PATCH /api/v1/admin/officers/:id/department`)
+           │
+     ┌─────┴─────────────────────────────────────┐
+     ▼                                           ▼
+[ Approve Officer ]                     [ Reject Officer ]
+(`PATCH /admin/officers/:id/approve`)   (`PATCH /admin/officers/:id/reject`)
+     │                                           │
+     ├─► Status: APPROVED                        ├─► Status: REJECTED
+     ├─► Dispatches OFFICER_APPROVED notif       ├─► Stores rejection reason
+     └─► Officer gains department access         └─► Dispatches OFFICER_REJECTED notif
+                                                 │
+                                                 ▼
+                                        Admin can Re-Approve
+                                        (`PATCH /admin/officers/:id/approve`)
+```
+
+---
+
+### 2. Admin Endpoints Specification
+
+All administrative endpoints strictly require authenticated users with the `ADMIN` role (`requireAdmin` middleware).
+
+| Method | Endpoint | Authorization | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/admin/officers` | `ADMIN` | Lists officer registrations with filtering (`?verification_status=PENDING&department_id=...`) and pagination (`?page=1&limit=20`). |
+| `GET` | `/api/v1/admin/officers/:officerId` | `ADMIN` | Detailed view of an officer profile (supports Profile ID or User ID). |
+| `PATCH` | `/api/v1/admin/officers/:officerId/approve` | `ADMIN` | Approves officer, clears rejection reason, and sends in-app approval notification. |
+| `PATCH` | `/api/v1/admin/officers/:officerId/reject` | `ADMIN` | Rejects officer with optional reason and sends in-app rejection notification. |
+| `PATCH` | `/api/v1/admin/officers/:officerId/department` | `ADMIN` | Assigns or modifies officer's department (must be an active department). |
+| `GET` | `/api/v1/admin/departments/:departmentId/officers` | `ADMIN` | Lists all officers belonging to a specific department. |
+| `GET` | `/api/v1/admin/complaints/summary` | `ADMIN` | Returns high-level complaint metrics (total, by status, and by department). |
+
+---
+
+### 3. API Examples
+
+#### 1. List Officer Registrations (`GET /api/v1/admin/officers?verification_status=PENDING`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Officer registrations retrieved successfully",
+  "data": {
+    "officers": [
+      {
+        "id": "f1111111-1111-4111-8111-111111111111",
+        "user_id": "f0000001-0001-4001-8001-000000000001",
+        "name": "Inspector Vijay",
+        "email": "vijay.officer@civicsense.local",
+        "phone": "+91-9888888888",
+        "designation": "Field Inspector",
+        "department": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "name": "Municipality / Sanitation",
+          "description": "Solid waste management",
+          "active": true
+        },
+        "verification_status": "PENDING",
+        "rejection_reason": null,
+        "created_at": "2026-08-23T11:00:00.000Z",
+        "updated_at": "2026-08-23T11:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 1,
+      "total_pages": 1
+    }
+  }
+}
+```
+
+#### 2. Assign Officer Department (`PATCH /api/v1/admin/officers/:officerId/department`)
+
+##### Request Body:
+```json
+{
+  "department_id": "22222222-2222-2222-2222-222222222222"
+}
+```
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Officer department updated successfully",
+  "data": {
+    "id": "f1111111-1111-4111-8111-111111111111",
+    "user_id": "f0000001-0001-4001-8001-000000000001",
+    "name": "Inspector Vijay",
+    "designation": "Field Inspector",
+    "department": {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "name": "Electricity Board",
+      "active": true
+    },
+    "verification_status": "PENDING"
+  }
+}
+```
+
+#### 3. Approve Officer (`PATCH /api/v1/admin/officers/:officerId/approve`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Officer approved successfully",
+  "data": {
+    "id": "f1111111-1111-4111-8111-111111111111",
+    "user_id": "f0000001-0001-4001-8001-000000000001",
+    "name": "Inspector Vijay",
+    "verification_status": "APPROVED",
+    "rejection_reason": null
+  }
+}
+```
+
+#### 4. Reject Officer (`PATCH /api/v1/admin/officers/:officerId/reject`)
+
+##### Request Body:
+```json
+{
+  "reason": "Fraudulent badge identification number."
+}
+```
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Officer rejected successfully",
+  "data": {
+    "id": "f1111111-1111-4111-8111-111111111111",
+    "user_id": "f0000001-0001-4001-8001-000000000001",
+    "verification_status": "REJECTED",
+    "rejection_reason": "Fraudulent badge identification number."
+  }
+}
+```
+
+#### 5. Complaint Summary Overview (`GET /api/v1/admin/complaints/summary`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Complaints summary retrieved successfully",
+  "data": {
+    "total_complaints": 42,
+    "by_status": {
+      "new": 10,
+      "assigned": 12,
+      "in_progress": 14,
+      "resolved": 6
+    },
+    "by_department": [
+      {
+        "department_id": "11111111-1111-1111-1111-111111111111",
+        "department_name": "Municipality / Sanitation",
+        "count": 24
+      },
+      {
+        "department_id": "22222222-2222-2222-2222-222222222222",
+        "department_name": "Electricity Board",
+        "count": 18
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 🧪 Testing & Verification
+
+### Run the B11 Admin & Officer Verification Test Suite
+```bash
+npm run test:admin
+```
+
+| Test ID | Scenario | Expected Result |
+| :--- | :--- | :--- |
+| **Test A** | Admin lists officer registrations | `200 OK` with paginated officer profiles |
+| **Test B** | Admin filters pending officers | Returns only `verification_status = PENDING` |
+| **Test C** | Admin views officer details | `200 OK`, password hashes strictly excluded |
+| **Test D** | Admin assigns/updates officer department | Department changed to valid active department |
+| **Test G1** | Pending officer accesses officer endpoints | `403 Forbidden` |
+| **Test E** | Admin approves officer | `verification_status = APPROVED`, `rejection_reason = null` |
+| **Test F** | Officer approval notification | `OFFICER_APPROVED` notification sent |
+| **Test G2** | Approved officer accesses officer endpoints | `200 OK`, granted access to assigned department |
+| **Test H** | Admin rejects officer with reason | `verification_status = REJECTED` & reason stored |
+| **Test I** | Rejected officer accesses officer endpoints | `403 Forbidden` |
+| **Test P** | Admin re-approves previously rejected officer | `200 OK`, status restored to `APPROVED` |
+| **Test J** | Citizen attempts admin endpoints | `403 Forbidden` |
+| **Test K** | Officer attempts admin endpoints | `403 Forbidden` |
+| **Test L** | Admin views complaint summary metrics | `200 OK` with aggregate status & department breakdown |
+| **Test M1** | Assigning inactive department | `400 BadRequestError` |
+| **Test M2** | Assigning non-existent department | `404 NotFoundError` |
+| **Test N** | Admin lists officers by department | `200 OK` filtered to target department |
+
+---
+
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B11 Admin & Officer Verification Tests
+npm run test:admin
+
 # Run B10 In-App Notifications Tests
 npm run test:notifications
 
@@ -572,6 +796,7 @@ npm run test:db
 npm run lint
 npm run build
 ```
+
 
 
 
