@@ -22,9 +22,6 @@ export class DuplicateDetectorService {
   private static readonly PROXIMITY_THRESHOLD_METERS = 150; // Within 150 meters
   private static readonly RECENCY_DAYS = 14; // Within last 14 days
 
-  /**
-   * Tokenize text into words for similarity comparison
-   */
   private static extractTokens(text: string): Set<string> {
     const words = text
       .toLowerCase()
@@ -34,29 +31,20 @@ export class DuplicateDetectorService {
     return new Set(words);
   }
 
-  /**
-   * Compute Jaccard token similarity between two strings
-   */
   private static computeSimilarity(textA: string, textB: string): number {
     const tokensA = this.extractTokens(textA);
     const tokensB = this.extractTokens(textB);
-
     if (tokensA.size === 0 || tokensB.size === 0) return 0;
 
     let intersection = 0;
     for (const token of tokensA) {
-      if (tokensB.has(token)) {
-        intersection++;
-      }
+      if (tokensB.has(token)) intersection++;
     }
 
     const union = new Set([...tokensA, ...tokensB]).size;
     return intersection / union;
   }
 
-  /**
-   * Check for potential nearby duplicate complaints in the same department
-   */
   public static async findPotentialDuplicates(
     departmentId: string,
     latitude?: number | null,
@@ -66,17 +54,15 @@ export class DuplicateDetectorService {
   ): Promise<DuplicateCheckResult> {
     const cutoffDate = new Date(Date.now() - this.RECENCY_DAYS * 24 * 60 * 60 * 1000);
 
-    // 1. Fetch recent unresolved complaints for the same department
     const recentComplaints = await prisma.complaint.findMany({
       where: {
         department_id: departmentId,
-        created_at: {
-          gte: cutoffDate,
-        },
+        created_at: { gte: cutoffDate },
         status: {
           in: [ComplaintStatus.NEW, ComplaintStatus.ASSIGNED, ComplaintStatus.IN_PROGRESS],
         },
       },
+      orderBy: { created_at: 'desc' },
       select: {
         id: true,
         title: true,
@@ -90,14 +76,12 @@ export class DuplicateDetectorService {
     });
 
     const potentialDuplicates: PotentialDuplicateSummary[] = [];
-
     const targetText = `${title || ''} ${description || ''}`;
 
     for (const complaint of recentComplaints) {
       let isNearby = false;
       let distanceMeters = 0;
 
-      // Check proximity if coordinates are present on both complaints
       if (
         latitude != null &&
         longitude != null &&
@@ -111,16 +95,14 @@ export class DuplicateDetectorService {
           complaint.longitude
         );
         distanceMeters = distResult.distanceMeters;
-        if (distanceMeters <= this.PROXIMITY_THRESHOLD_METERS) {
-          isNearby = true;
-        }
+        if (distanceMeters <= this.PROXIMITY_THRESHOLD_METERS) isNearby = true;
       }
 
-      // Check text similarity
-      const otherText = `${complaint.title} ${complaint.description}`;
-      const similarity = this.computeSimilarity(targetText, otherText);
+      const similarity = this.computeSimilarity(
+        targetText,
+        `${complaint.title} ${complaint.description}`
+      );
 
-      // Match criteria: either very close spatially + some text similarity, or high text similarity
       if ((isNearby && similarity >= 0.2) || similarity >= 0.6) {
         potentialDuplicates.push({
           id: complaint.id,
