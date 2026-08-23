@@ -20,6 +20,39 @@ export interface FormattedAdminOfficer {
 export interface PaginatedAdminOfficersResponse { officers: FormattedAdminOfficer[]; pagination: { page: number; limit: number; total: number; total_pages: number } }
 export interface ComplaintsSummaryResponse { total_complaints: number; by_status: { new: number; assigned: number; in_progress: number; resolved: number }; by_department: Array<{ department_id: string; department_name: string; count: number }> }
 
+export interface CivicHotspot {
+  cluster_id: string;
+  latitude: number;
+  longitude: number;
+  complaint_count: number;
+  status_summary: {
+    new: number;
+    assigned: number;
+    in_progress: number;
+    resolved: number;
+  };
+  departments: Array<{
+    department_id: string;
+    department_name: string;
+    count: number;
+  }>;
+}
+
+export interface DepartmentStatistics {
+  department_id: string;
+  department_name: string;
+  description: string | null;
+  active: boolean;
+  total_complaints: number;
+  by_status: {
+    new: number;
+    assigned: number;
+    in_progress: number;
+    resolved: number;
+  };
+  average_resolution_time_hours: number | null;
+}
+
 export class AdminService {
   private static formatOfficer(profile: any): FormattedAdminOfficer {
     return {
@@ -126,5 +159,126 @@ export class AdminService {
       by_status: { new: newCount, assigned: assignedCount, in_progress: inProgressCount, resolved: resolvedCount },
       by_department: departments.map((d) => ({ department_id: d.id, department_name: d.name, count: d._count.complaints })),
     };
+  }
+
+  public static async getCivicHotspots(): Promise<{ hotspots: CivicHotspot[] }> {
+    const complaints = await prisma.complaint.findMany({
+      where: { latitude: { not: null }, longitude: { not: null } },
+      select: {
+        id: true, latitude: true, longitude: true, status: true,
+        department: { select: { id: true, name: true } },
+      },
+    });
+
+    const clustersMap = new Map<string, {
+      latSum: number;
+      lonSum: number;
+      count: number;
+      status: { new: number; assigned: number; in_progress: number; resolved: number };
+      departmentsMap: Map<string, { name: string; count: number }>;
+    }>();
+
+    for (const c of complaints) {
+      if (c.latitude == null || c.longitude == null) continue;
+      const latGrid = c.latitude.toFixed(2);
+      const lonGrid = c.longitude.toFixed(2);
+      const key = `${latGrid},${lonGrid}`;
+
+      if (!clustersMap.has(key)) {
+        clustersMap.set(key, {
+          latSum: 0, lonSum: 0, count: 0,
+          status: { new: 0, assigned: 0, in_progress: 0, resolved: 0 },
+          departmentsMap: new Map(),
+        });
+      }
+
+      const cluster = clustersMap.get(key)!;
+      cluster.latSum += c.latitude;
+      cluster.lonSum += c.longitude;
+      cluster.count++;
+
+      if (c.status === ComplaintStatus.NEW) cluster.status.new++;
+      else if (c.status === ComplaintStatus.ASSIGNED) cluster.status.assigned++;
+      else if (c.status === ComplaintStatus.IN_PROGRESS) cluster.status.in_progress++;
+      else if (c.status === ComplaintStatus.RESOLVED) cluster.status.resolved++;
+
+      const deptId = c.department.id;
+      const deptName = c.department.name;
+      const deptEntry = cluster.departmentsMap.get(deptId) || { name: deptName, count: 0 };
+      deptEntry.count++;
+      cluster.departmentsMap.set(deptId, deptEntry);
+    }
+
+    const hotspots: CivicHotspot[] = Array.from(clustersMap.entries()).map(([key, data]) => ({
+      cluster_id: key,
+      latitude: Math.round((data.latSum / data.count) * 10000) / 10000,
+      longitude: Math.round((data.lonSum / data.count) * 10000) / 10000,
+      complaint_count: data.count,
+      status_summary: data.status,
+      departments: Array.from(data.departmentsMap.entries()).map(([deptId, dept]) => ({
+        department_id: deptId,
+        department_name: dept.name,
+        count: dept.count,
+      })),
+    }));
+
+    hotspots.sort((a, b) => b.complaint_count - a.complaint_count);
+    return { hotspots };
+  }
+
+  public static async getDepartmentStatistics(): Promise<{ departments: DepartmentStatistics[] }> {
+    const departments = await prisma.department.findMany({
+      include: {
+        complaints: {
+          select: {
+            id: true, status: true, created_at: true,
+            resolution: { select: { resolved_at: true } },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const stats: DepartmentStatistics[] = departments.map((d) => {
+      let newCount = 0, assignedCount = 0, inProgressCount = 0, resolvedCount = 0;
+      let totalResolutionHours = 0, resolvedWithTimeCount = 0;
+
+      for (const c of d.complaints) {
+        if (c.status === ComplaintStatus.NEW) newCount++;
+        else if (c.status === ComplaintStatus.ASSIGNED) assignedCount++;
+        else if (c.status === ComplaintStatus.IN_PROGRESS) inProgressCount++;
+        else if (c.status === ComplaintStatus.RESOLVED) {
+          resolvedCount++;
+          if (c.resolution?.resolved_at) {
+            const diffMs = new Date(c.resolution.resolved_at).getTime() - new Date(c.created_at).getTime();
+            const diffHours = Math.max(0, diffMs / (1000 * 60 * 60));
+            totalResolutionHours += diffHours;
+            resolvedWithTimeCount++;
+          }
+        }
+      }
+
+      const avgResolutionTime =
+        resolvedWithTimeCount > 0
+          ? Math.round((totalResolutionHours / resolvedWithTimeCount) * 10) / 10
+          : null;
+
+      return {
+        department_id: d.id,
+        department_name: d.name,
+        description: d.description,
+        active: d.active,
+        total_complaints: d.complaints.length,
+        by_status: {
+          new: newCount,
+          assigned: assignedCount,
+          in_progress: inProgressCount,
+          resolved: resolvedCount,
+        },
+        average_resolution_time_hours: avgResolutionTime,
+      };
+    });
+
+    return { departments: stats };
   }
 }

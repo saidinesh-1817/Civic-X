@@ -130,4 +130,38 @@ export class AdminController {
       next(error);
     }
   };
+
+  /**
+   * GET /api/v1/admin/complaints/hotspots
+   * Aggregated civic hotspots by geographic cluster
+   */
+  public static getCivicHotspots = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.getCivicHotspots();
+      ApiResponse.success(res, result, 'Civic hotspots retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/v1/admin/departments/statistics
+   * Operational and resolution statistics per department
+   */
+  public static getDepartmentStatistics = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.getDepartmentStatistics();
+      ApiResponse.success(res, result, 'Department statistics retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
 }

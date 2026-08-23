@@ -378,9 +378,120 @@ Content-Type: application/json
 }
 ```
 
+#### 8. Civic Hotspot Statistics (`GET /api/v1/admin/complaints/hotspots`)
+- **Role**: `ADMIN`
+- **Description**: Returns anonymized geographic clusters (~1.1km grid) of complaints for city-wide heatmap and hotspot visualization. Citizen identities are strictly protected.
+- **Response (`200 OK`)**:
+```json
+{
+  "success": true,
+  "message": "Civic hotspots retrieved successfully",
+  "data": {
+    "hotspots": [
+      {
+        "cluster_id": "12.97,77.59",
+        "latitude": 12.9718,
+        "longitude": 77.5947,
+        "complaint_count": 8,
+        "status_summary": {
+          "new": 2,
+          "assigned": 3,
+          "in_progress": 2,
+          "resolved": 1
+        },
+        "departments": [
+          {
+            "department_id": "11111111-1111-1111-1111-111111111111",
+            "department_name": "Municipality / Sanitation",
+            "count": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 9. Department Performance & SLA Statistics (`GET /api/v1/admin/departments/statistics`)
+- **Role**: `ADMIN`
+- **Description**: Returns operational resolution statistics and average turnaround time for each department.
+- **Response (`200 OK`)**:
+```json
+{
+  "success": true,
+  "message": "Department statistics retrieved successfully",
+  "data": {
+    "departments": [
+      {
+        "department_id": "11111111-1111-1111-1111-111111111111",
+        "department_name": "Municipality / Sanitation",
+        "description": "Waste and sanitation",
+        "active": true,
+        "total_complaints": 24,
+        "by_status": {
+          "new": 4,
+          "assigned": 6,
+          "in_progress": 8,
+          "resolved": 6
+        },
+        "average_resolution_time_hours": 18.5
+      }
+    ]
+  }
+}
+```
+
 ---
 
-## 5. End-to-End Workflow Diagram
+## 5. Advanced Backend Features (B13)
+
+### ⚡ Deterministic Priority Calculation
+The backend evaluates complaint title, description, and department urgency on submission:
+- **`CRITICAL`**: Public safety hazards (e.g. *live wire, gas leak, building collapse, open manhole, pipeline burst*). SLA target: **24 hours**.
+- **`HIGH`**: Urgent public health/infrastructure concerns (e.g. *sewage overflow, garbage dump, contaminated water, traffic signal down*). SLA target: **48 hours**.
+- **`MEDIUM`**: Standard civic issues (default). SLA target: **72 hours**.
+- **`LOW`**: Routine cosmetic maintenance (e.g. *garden pruning, park bench, graffiti*). SLA target: **120 hours**.
+
+### 🔍 Non-Blocking Duplicate Complaint Detection
+When creating a complaint, the backend detects nearby complaints in the same department (within $\le 150\text{ meters}$) with matching keyword tokens:
+```json
+{
+  "possible_duplicate": true,
+  "duplicate_count": 1,
+  "potential_duplicates": [
+    {
+      "id": "comp-uuid",
+      "complaint_number": "CIV-428889",
+      "title": "Sewage overflow on 4th block",
+      "status": "IN_PROGRESS",
+      "distance_meters": 35,
+      "created_at": "2026-08-22T08:00:00.000Z"
+    }
+  ]
+}
+```
+*Note: Submissions are never blocked; this provides helpful feedback for frontend UIs and officers.*
+
+### ⏳ SLA & Aging Tracking
+Complaint details returned by `GET /api/v1/complaints/:id` include live SLA calculation metrics:
+```json
+{
+  "sla": {
+    "age_hours": 14.5,
+    "age_days": 0.6,
+    "sla_threshold_hours": 24,
+    "is_overdue": false,
+    "resolution_time_hours": null
+  }
+}
+```
+
+### 🤖 Local AI Abstraction & Resilient Fallback
+The backend features an extensible `IIssueClassifier` interface (`src/modules/ai/classifier.interface.ts`). When no local ML model is loaded, the system automatically falls back to deterministic rule routing with zero external API dependencies or costs.
+
+---
+
+## 6. End-to-End Workflow Diagram
 
 ```
 [ CITIZEN ]                                           [ OFFICER ]
@@ -390,14 +501,16 @@ Content-Type: application/json
     ├─► Browse Departments & Offices                       │   [ ADMIN APPROVES ]
     │                                                      │          │
     ├─► Submit Complaint (Photo + GPS) ───[ NEW ]─────────┼──► Receives Notification
+    │   ├─ Priority calculated (CRITICAL/HIGH/MED/LOW)     │          │
+    │   └─ Duplicate scan (Non-blocking)                   ├─► Views Complaint & SLA
     │                                                      │          │
-    ├─◄ Receives Submission Confirmation                   ├─► Views Complaint
+    ├─◄ Receives Submission Confirmation                   ├─► Accepts Complaint
     │                                                      │          │
-    ├─◄ Receives "Complaint Assigned" ───[ ASSIGNED ]──────┼──► Accepts Complaint
+    ├─◄ Receives "Complaint Assigned" ───[ ASSIGNED ]──────┼──► Starts Work
     │                                                      │          │
-    ├─◄ Receives "Work Started" ────────[ IN_PROGRESS ]───┼──► Starts Work
+    ├─◄ Receives "Work Started" ────────[ IN_PROGRESS ]───┼──► Submits Photo & Note
     │                                                      │          │
-    ├─◄ Receives "Complaint Resolved" ───[ RESOLVED ]─────┼──► Submits Photo & Note
+    ├─◄ Receives "Complaint Resolved" ───[ RESOLVED ]─────┼──► Status: RESOLVED
     │                                                      │
     ├─► Views Resolved Complaint & Evidence                │
     └─► Manages In-App Notifications                       └─► Manages In-App Notifications

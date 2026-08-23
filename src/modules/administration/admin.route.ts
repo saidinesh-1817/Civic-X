@@ -28,6 +28,18 @@ adminRouter.get(
   AdminController.getComplaintsSummary
 );
 
+// GET /api/v1/admin/complaints/hotspots: Aggregated civic hotspots
+adminRouter.get(
+  '/complaints/hotspots',
+  AdminController.getCivicHotspots
+);
+
+// GET /api/v1/admin/departments/statistics: Department performance and SLA statistics
+adminRouter.get(
+  '/departments/statistics',
+  AdminController.getDepartmentStatistics
+);
+
 // GET /api/v1/admin/officers: List officer registrations with filtering & pagination
 adminRouter.get(
   '/officers',

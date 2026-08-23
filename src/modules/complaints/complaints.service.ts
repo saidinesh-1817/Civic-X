@@ -6,6 +6,9 @@ import { SafeUser } from '../auth/auth.service.js';
 import { DepartmentsService } from '../departments/departments.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { CreateComplaintInput, MyComplaintsQueryInput } from './complaints.schema.js';
+import { PriorityService } from './priority.service.js';
+import { DuplicateDetectorService, PotentialDuplicateSummary } from './duplicateDetector.service.js';
+import { ComplaintSlaService, ComplaintSlaInfo } from './sla.service.js';
 
 export interface FormattedComplaintSummary {
   id: string;
@@ -47,6 +50,11 @@ export interface FormattedComplaintDetail {
   longitude: number | null;
   priority: Priority;
   status: ComplaintStatus;
+  sla?: ComplaintSlaInfo;
+  possible_duplicate?: boolean;
+  duplicate_count?: number;
+  potential_duplicates?: PotentialDuplicateSummary[];
+  priority_reason?: string;
   department: {
     id: string;
     name: string;
@@ -166,7 +174,22 @@ export class ComplaintsService {
       }
     }
 
-    // 4. Persistence with Atomic Status History Log
+    // 4. Calculate deterministic priority & detect potential duplicates
+    const calculatedPriority = PriorityService.calculatePriority(
+      input.title,
+      input.description,
+      department.name
+    );
+
+    const duplicateCheck = await DuplicateDetectorService.findPotentialDuplicates(
+      input.department_id,
+      input.latitude,
+      input.longitude,
+      input.title,
+      input.description
+    );
+
+    // 5. Persistence with Atomic Status History Log
     const createdComplaint = await prisma.$transaction(async (tx) => {
       const complaint = await tx.complaint.create({
         data: {
@@ -178,7 +201,7 @@ export class ComplaintsService {
           photo_url: finalPhotoUrl,
           latitude: input.latitude ?? null,
           longitude: input.longitude ?? null,
-          priority: Priority.MEDIUM, // Strict default: MEDIUM
+          priority: calculatedPriority.priority, // Calculated deterministic priority
           status: ComplaintStatus.NEW, // Strict default: NEW
         },
         include: {
@@ -240,6 +263,10 @@ export class ComplaintsService {
       latitude: createdComplaint.latitude,
       longitude: createdComplaint.longitude,
       priority: createdComplaint.priority,
+      priority_reason: calculatedPriority.reason,
+      possible_duplicate: duplicateCheck.possible_duplicate,
+      duplicate_count: duplicateCheck.duplicate_count,
+      potential_duplicates: duplicateCheck.potential_duplicates,
       status: createdComplaint.status,
       department: {
         id: createdComplaint.department.id,
@@ -428,6 +455,13 @@ export class ComplaintsService {
       );
     }
 
+    const slaInfo = ComplaintSlaService.calculateSlaStatus(
+      complaint.created_at,
+      complaint.status,
+      complaint.priority,
+      complaint.resolution?.resolved_at
+    );
+
     return {
       id: complaint.id,
       complaint_number: generateComplaintNumber(complaint.id),
@@ -438,6 +472,7 @@ export class ComplaintsService {
       longitude: complaint.longitude,
       priority: complaint.priority,
       status: complaint.status,
+      sla: slaInfo,
       department: {
         id: complaint.department.id,
         name: complaint.department.name,

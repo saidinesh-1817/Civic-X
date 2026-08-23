@@ -759,9 +759,39 @@ npm run test:admin
 
 ---
 
+## ⚡ Optional Advanced Backend Features (B13)
+
+### 1. Deterministic Priority Engine
+- Automatically computes complaint priority upon creation using deterministic keywords and department context:
+  - **`CRITICAL`**: Public emergency and life safety hazards (e.g. *live wire, gas leak, building collapse, open manhole*). SLA: **24 hours**.
+  - **`HIGH`**: Severe public health/infrastructure impact (e.g. *sewage overflow, garbage dump, no drinking water*). SLA: **48 hours**.
+  - **`MEDIUM`**: Standard civic complaints (default). SLA: **72 hours**.
+  - **`LOW`**: Routine cosmetic/garden maintenance (e.g. *garden pruning, park bench repainting*). SLA: **120 hours**.
+
+### 2. Duplicate Complaint Detection
+- Detects nearby active complaints in the same department (within $\le 150\text{m}$) with matching keywords.
+- Non-blocking: Submissions are created successfully while providing `possible_duplicate: true` and reference IDs.
+
+### 3. Civic Hotspot Statistics (`GET /api/v1/admin/complaints/hotspots`)
+- Anonymously aggregates civic complaints into geographic clusters (~1.1km grid resolution) for city heatmaps.
+
+### 4. Department Performance & SLA Statistics (`GET /api/v1/admin/departments/statistics`)
+- Aggregates operational status breakdown and calculates average resolution duration in hours per department.
+
+### 5. Local AI Classifier Abstraction
+- Clean `IIssueClassifier` interface with automatic zero-cost fallback when no local AI model is configured.
+
+---
+
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B13 Advanced Features Tests
+npm run test:advanced
+
+# Run Master End-to-End Test Suite
+npm test
+
 # Run B11 Admin & Officer Verification Tests
 npm run test:admin
 
@@ -788,9 +818,6 @@ npm run test:authz
 
 # Run B3 Authentication & RBAC Tests
 npm run test:auth
-
-# Run B1/B2 Database Schema Integrity Checks
-npm run test:db
 
 # Run TypeScript Linting & Compilation Build
 npm run lint
