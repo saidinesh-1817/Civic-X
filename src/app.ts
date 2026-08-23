@@ -33,6 +33,15 @@ export const createApp = (): Express => {
   // Serve static uploaded assets (complaint photos, resolutions)
   app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
+  // Root health endpoint (for cloud load balancers and container probes)
+  app.get('/health', (_req: Request, res: Response) => {
+    res.status(200).json({
+      status: 'ok',
+      service: 'CivicSense API',
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Root endpoint info
   app.get('/', (_req: Request, res: Response) => {
     res.status(200).json({

@@ -51,7 +51,7 @@ export const config: AppConfig = {
   isTest: nodeEnv === 'test',
   port: parseInt(process.env.PORT || '5000', 10),
   apiPrefix: process.env.API_PREFIX || '/api',
-  corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
+  corsOrigin: parseCorsOrigin(process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:5173'),
   databaseUrl:
     process.env.DATABASE_URL ||
     'postgresql://postgres:postgres@localhost:5432/civicsense?schema=public',
