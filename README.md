@@ -209,34 +209,208 @@ Authorization: Bearer <APPROVED_OFFICER_JWT>
 
 ---
 
+---
+
+## 🔄 Status Workflow & Resolution System (B9)
+
+### 1. Complete Complaint Lifecycle
+
+```
+       Citizen Submits
+             │
+             ▼
+         ┌───────┐
+         │  NEW  │
+         └───┬───┘
+             │ Officer Accepts (`POST /api/v1/officer/complaints/:id/assign`)
+             ▼
+        ┌──────────┐
+        │ ASSIGNED │
+        └────┬─────┘
+             │ Assigned Officer Starts Work (`PATCH /api/v1/officer/complaints/:id/status`)
+             ▼
+       ┌─────────────┐
+       │ IN_PROGRESS │
+       └─────┬───────┘
+             │ Assigned Officer Resolves with Photo Evidence (`POST /api/v1/officer/complaints/:id/resolve`)
+             ▼
+        ┌──────────┐
+        │ RESOLVED │
+        └──────────┘
+```
+
+---
+
+### 2. Endpoints Specification
+
+| Method | Endpoint | Authorization | Description |
+| :--- | :--- | :--- | :--- |
+| `PATCH` | `/api/v1/officer/complaints/:complaintId/status` | `APPROVED OFFICER` (Assigned) | Starts work on an assigned complaint (`ASSIGNED` $\rightarrow$ `IN_PROGRESS`). |
+| `POST` | `/api/v1/officer/complaints/:complaintId/resolve` | `APPROVED OFFICER` (Assigned) | Resolves an in-progress complaint with photo evidence & notes (`IN_PROGRESS` $\rightarrow$ `RESOLVED`). |
+
+---
+
+### 3. Start Work (`PATCH /api/v1/officer/complaints/:complaintId/status`)
+
+Transitions an assigned complaint to `IN_PROGRESS`.
+
+#### Security & Access Rules:
+- **Authenticated Approved Officer**: Requires a valid JWT from an `APPROVED` officer.
+- **Department Boundary**: Complaint must belong to the officer's department (`403 Forbidden` on cross-department attempts).
+- **Officer Assignment**: The officer must be assigned to the complaint (`403 Forbidden` if unassigned).
+- **Valid Transition**: Strictly `ASSIGNED` $\rightarrow$ `IN_PROGRESS`.
+- **Invalid Transitions**: Attempting to start work on a `NEW`, `IN_PROGRESS`, or `RESOLVED` complaint returns `400 BadRequestError`.
+
+#### Request Body (`application/json`):
+```json
+{
+  "status": "IN_PROGRESS",
+  "note": "Maintenance team has arrived on site and started repairs."
+}
+```
+
+#### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Complaint status updated successfully",
+  "data": {
+    "id": "c1111111-1111-1111-1111-111111111111",
+    "complaint_number": "CIV-100001",
+    "title": "Garbage Dump Overflow",
+    "status": "IN_PROGRESS",
+    "status_history": [
+      {
+        "id": "sh-1",
+        "status": "NEW",
+        "note": "Complaint registered by citizen.",
+        "created_at": "2026-08-18T10:00:00.000Z"
+      },
+      {
+        "id": "sh-2",
+        "status": "ASSIGNED",
+        "note": "Inspector Ramesh taking ownership.",
+        "created_at": "2026-08-21T10:16:52.000Z"
+      },
+      {
+        "id": "sh-3",
+        "status": "IN_PROGRESS",
+        "note": "Maintenance team has arrived on site and started repairs.",
+        "created_at": "2026-08-23T11:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 4. Resolve Complaint (`POST /api/v1/officer/complaints/:complaintId/resolve`)
+
+Resolves an `IN_PROGRESS` complaint with mandatory photo evidence and resolution notes.
+
+#### Security & Access Rules:
+- **Authenticated Approved Officer**: Requires valid JWT from an `APPROVED` officer.
+- **Department Boundary**: Complaint must belong to the officer's department (`403 Forbidden` on mismatch).
+- **Officer Assignment**: Officer must be assigned to the complaint (`403 Forbidden` if unassigned).
+- **Mandatory Photo Evidence**: Photo payload (`photo`, `photo_url`, `resolution_photo`) is required; validated via magic-bytes (JPEG, PNG, WEBP, GIF, $\le 5\text{ MB}$).
+- **Mandatory Resolution Note**: Clear explanation of resolution actions taken is required ($\le 5000\text{ characters}$).
+- **Valid Transition**: Strictly `IN_PROGRESS` $\rightarrow$ `RESOLVED`.
+- **Invalid Transitions**: Attempting to resolve a `NEW`, `ASSIGNED`, or already `RESOLVED` complaint returns `400 BadRequestError`.
+- **Single Active Resolution**: Persisted in the `resolutions` table with a `@unique` constraint per complaint.
+
+#### Request Body (`application/json`):
+```json
+{
+  "note": "Garbage removed completely and the area has been disinfected.",
+  "photo": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+}
+```
+
+#### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Complaint resolved successfully",
+  "data": {
+    "id": "c1111111-1111-1111-1111-111111111111",
+    "complaint_number": "CIV-100001",
+    "title": "Garbage Dump Overflow",
+    "status": "RESOLVED",
+    "resolution": {
+      "id": "res-9182374981",
+      "photo_url": "/uploads/resolutions/resolutions_1787464499107_74332b35ac55c92b.png",
+      "note": "Garbage removed completely and the area has been disinfected.",
+      "resolved_at": "2026-08-23T11:20:00.000Z",
+      "created_at": "2026-08-23T11:20:00.000Z"
+    },
+    "status_history": [
+      {
+        "id": "sh-1",
+        "status": "NEW",
+        "note": "Complaint registered by citizen.",
+        "created_at": "2026-08-18T10:00:00.000Z"
+      },
+      {
+        "id": "sh-2",
+        "status": "ASSIGNED",
+        "note": "Inspector Ramesh taking ownership.",
+        "created_at": "2026-08-21T10:16:52.000Z"
+      },
+      {
+        "id": "sh-3",
+        "status": "IN_PROGRESS",
+        "note": "Maintenance team has arrived on site and started repairs.",
+        "created_at": "2026-08-23T11:00:00.000Z"
+      },
+      {
+        "id": "sh-4",
+        "status": "RESOLVED",
+        "note": "Garbage removed completely and the area has been disinfected.",
+        "created_at": "2026-08-23T11:20:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## 🧪 Testing & Verification
 
-### Run the B8 Officer Complaint Test Suite
+### Run the B9 Status Workflow & Resolution Test Suite
 ```bash
-npm run test:officers
+npm run test:workflow
 ```
 
 | Test ID | Scenario | Expected Result |
 | :--- | :--- | :--- |
-| **Test A** | Approved Municipality officer lists Municipality complaints | `200 OK` + department complaints list |
-| **Test B** | Query param injection (`?department_id=...`) to access other departments | Ignored; strictly scoped to officer department |
-| **Test C** | Approved officer opens own department complaint | `200 OK` + complete timeline + assignment info |
-| **Test D** | Officer opens another department's complaint | `403 Forbidden` |
-| **Test E** | Officer accepts NEW complaint | `200 OK` + updated complaint |
-| **Test F** | Complaint status transition | Transitions `NEW` $\rightarrow$ `ASSIGNED` |
-| **Test G** | `ComplaintAssignment` record | Created with authentic `officer_id` and `assigned_by` |
-| **Test H** | `ComplaintStatusHistory` record | Logged with `status = ASSIGNED` and officer note |
-| **Test I** | Citizen tries officer endpoint | `403 Forbidden` |
-| **Test J** | Pending / Rejected officer tries officer endpoint | `403 Forbidden` |
-| **Test K** | Officer tries to spoof `officer_id` in request body | Ignored; authentic server-side identity used |
-| **Test L** | Officer attempts to accept an already ASSIGNED complaint | `400 BadRequestError` |
-| **Test M** | Filtering by `priority`, `status`, and `office_id` | Accurate results within department boundaries |
+| **Test A** | Initial complaint state verification | `status = NEW` |
+| **Test B** | Officer accepts complaint | Transitions `NEW` $\rightarrow$ `ASSIGNED` (`200 OK`) |
+| **Test C** | Assigned officer starts work | Transitions `ASSIGNED` $\rightarrow$ `IN_PROGRESS` (`200 OK`) |
+| **Test D** | Assigned officer resolves complaint | Transitions `IN_PROGRESS` $\rightarrow$ `RESOLVED` (`200 OK`) |
+| **Test E** | Resolution photo verification | Safe filename saved to `/uploads/resolutions/` & verified on disk |
+| **Test F** | Resolution record creation | Created with authentic `officer_id`, `photo_url`, `note`, `resolved_at` |
+| **Test G** | Complete lifecycle timeline | Preserves `NEW` $\rightarrow$ `ASSIGNED` $\rightarrow$ `IN_PROGRESS` $\rightarrow$ `RESOLVED` history |
+| **Test H** | Unassigned officer attempts `IN_PROGRESS` | `403 Forbidden` |
+| **Test I** | Officer from another department attempts modification | `403 Forbidden` |
+| **Test J** | Citizen attempts officer status transitions | `403 Forbidden` |
+| **Test K** | Direct `NEW` $\rightarrow$ `RESOLVED` skip attempt | `400/403 Error` |
+| **Test K2** | Direct `ASSIGNED` $\rightarrow$ `RESOLVED` skip attempt | `400 BadRequestError` |
+| **Test L** | Modifying or re-opening a `RESOLVED` complaint | `400 BadRequestError` |
+| **Test M** | Resolve attempt with missing photo | `400/422 Validation error` |
+| **Test N** | Resolve attempt with missing note | `400/422 Validation error` |
+| **Test O** | Citizen visibility (B7 `GET /complaints/:id`) | Citizen sees status `RESOLVED`, resolution photo/note, and complete timeline |
+| **Test P** | Officer visibility (B8 `GET /officer/complaints/:id`) | Officer sees updated `RESOLVED` state and resolution details |
 
 ---
 
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B9 Status Workflow & Resolution Tests
+npm run test:workflow
+
 # Run B8 Officer Complaint Management Tests
 npm run test:officers
 
@@ -262,6 +436,7 @@ npm run test:db
 npm run lint
 npm run build
 ```
+
 
 ---
 

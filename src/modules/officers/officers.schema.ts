@@ -55,5 +55,56 @@ export const complaintIdParamSchema = z.object({
   complaintId: z.string().uuid({ message: 'Invalid Complaint ID format. Must be a valid UUID.' }),
 });
 
+/**
+ * Validation schema for updating complaint status: PATCH /api/v1/officer/complaints/:complaintId/status
+ */
+export const updateComplaintStatusSchema = z.object({
+  status: z.nativeEnum(ComplaintStatus, {
+    errorMap: () => ({
+      message: 'Invalid status. Allowed: NEW, ASSIGNED, IN_PROGRESS, RESOLVED',
+    }),
+  }),
+  note: z.string().trim().max(1000).optional(),
+});
+
+/**
+ * Validation schema for resolving complaint: POST /api/v1/officer/complaints/:complaintId/resolve
+ */
+export const resolveComplaintSchema = z
+  .object({
+    note: z.string().trim().max(5000).optional(),
+    resolution_note: z.string().trim().max(5000).optional(),
+    photo: z.string().optional(),
+    photo_url: z.string().optional(),
+    resolution_photo: z.string().optional(),
+    resolution_photo_url: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      const note = data.note || data.resolution_note;
+      return typeof note === 'string' && note.trim().length > 0;
+    },
+    {
+      message: 'Resolution note is required',
+      path: ['note'],
+    }
+  )
+  .refine(
+    (data) => {
+      const photo =
+        data.photo ||
+        data.photo_url ||
+        data.resolution_photo ||
+        data.resolution_photo_url;
+      return typeof photo === 'string' && photo.trim().length > 0;
+    },
+    {
+      message: 'Resolution photo is required',
+      path: ['photo'],
+    }
+  );
+
 export type OfficerComplaintsQueryInput = z.infer<typeof officerComplaintsQuerySchema>;
 export type AssignComplaintInput = z.infer<typeof assignComplaintSchema>;
+export type UpdateComplaintStatusInput = z.infer<typeof updateComplaintStatusSchema>;
+export type ResolveComplaintInput = z.infer<typeof resolveComplaintSchema>;

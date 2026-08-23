@@ -64,4 +64,48 @@ export class OfficersController {
       next(error);
     }
   };
+
+  /**
+   * PATCH /api/v1/officer/complaints/:complaintId/status
+   * Update complaint status to IN_PROGRESS (APPROVED OFFICER ONLY, ASSIGNED OFFICER ONLY)
+   */
+  public static updateComplaintStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const officer = getAuthenticatedUser(req);
+      const result = await OfficersService.updateComplaintStatus(
+        officer,
+        req.params.complaintId,
+        req.body
+      );
+      ApiResponse.success(res, result, 'Complaint status updated successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * POST /api/v1/officer/complaints/:complaintId/resolve
+   * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY, ASSIGNED OFFICER ONLY)
+   */
+  public static resolveComplaint = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const officer = getAuthenticatedUser(req);
+      const result = await OfficersService.resolveComplaint(
+        officer,
+        req.params.complaintId,
+        req.body
+      );
+      ApiResponse.success(res, result, 'Complaint resolved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
 }

@@ -9,6 +9,8 @@ import {
   assignComplaintSchema,
   complaintIdParamSchema,
   officerComplaintsQuerySchema,
+  resolveComplaintSchema,
+  updateComplaintStatusSchema,
 } from './officers.schema.js';
 
 export const officersRouter = Router();
@@ -42,4 +44,22 @@ officersRouter.post(
   requireApprovedOfficer,
   validate({ params: complaintIdParamSchema, body: assignComplaintSchema }),
   OfficersController.assignComplaint
+);
+
+// PATCH /complaints/:complaintId/status: Start work on an assigned complaint (APPROVED OFFICER ONLY)
+officersRouter.patch(
+  '/complaints/:complaintId/status',
+  requireAuthentication,
+  requireApprovedOfficer,
+  validate({ params: complaintIdParamSchema, body: updateComplaintStatusSchema }),
+  OfficersController.updateComplaintStatus
+);
+
+// POST /complaints/:complaintId/resolve: Resolve an in-progress complaint with photo & note (APPROVED OFFICER ONLY)
+officersRouter.post(
+  '/complaints/:complaintId/resolve',
+  requireAuthentication,
+  requireApprovedOfficer,
+  validate({ params: complaintIdParamSchema, body: resolveComplaintSchema }),
+  OfficersController.resolveComplaint
 );

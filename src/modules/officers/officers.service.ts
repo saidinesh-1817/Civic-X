@@ -1,9 +1,15 @@
 import { ComplaintStatus, Priority, Role, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../config/database.js';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../../utils/apiError.js';
+import { saveBase64Image } from '../../utils/fileStorage.js';
 import { SafeUser } from '../auth/auth.service.js';
 import { generateComplaintNumber } from '../complaints/complaints.service.js';
-import { AssignComplaintInput, OfficerComplaintsQueryInput } from './officers.schema.js';
+import {
+  AssignComplaintInput,
+  OfficerComplaintsQueryInput,
+  ResolveComplaintInput,
+  UpdateComplaintStatusInput,
+} from './officers.schema.js';
 
 export interface FormattedOfficerComplaintSummary {
   id: string;
@@ -190,6 +196,207 @@ export class OfficersService {
           status: ComplaintStatus.ASSIGNED,
           changed_by: officer.id,
           note: input.note || `Complaint accepted by officer ${officer.name}.`,
+        },
+      });
+    });
+
+    return this.getDepartmentComplaintById(officer, complaintId);
+  }
+
+  /**
+   * Update complaint status to IN_PROGRESS (APPROVED OFFICER ONLY, MUST BE ASSIGNED TO COMPLAINT)
+   */
+  public static async updateComplaintStatus(
+    officer: SafeUser,
+    complaintId: string,
+    input: UpdateComplaintStatusInput
+  ): Promise<FormattedOfficerComplaintDetail> {
+    const { officerProfileId, departmentId } = this.getApprovedOfficerContext(officer);
+
+    // Validate that the requested status transition is allowed
+    if (input.status !== ComplaintStatus.IN_PROGRESS) {
+      throw new BadRequestError(
+        `Invalid status transition: Only transitioning to "IN_PROGRESS" is allowed via this endpoint.`
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Fetch complaint with current status, department, and assignments
+      const complaint = await tx.complaint.findUnique({
+        where: { id: complaintId },
+        include: {
+          assignments: {
+            orderBy: { assigned_at: 'desc' },
+          },
+        },
+      });
+
+      if (!complaint) {
+        throw new NotFoundError(`Complaint with ID "${complaintId}" not found`);
+      }
+
+      // 2. Department boundary check
+      if (complaint.department_id !== departmentId) {
+        throw new ForbiddenError(
+          'Access denied: You do not have permission to modify complaints belonging to another department.'
+        );
+      }
+
+      // 3. Officer assignment check
+      const isAssigned = complaint.assignments.some(
+        (a) => a.officer_id === officerProfileId
+      );
+      if (!isAssigned) {
+        throw new ForbiddenError(
+          'Access denied: You must be assigned to this complaint to update its status.'
+        );
+      }
+
+      // 4. Status transition validation: Allowed transition: ASSIGNED -> IN_PROGRESS
+      if (complaint.status === ComplaintStatus.IN_PROGRESS) {
+        throw new BadRequestError('Complaint is already in "IN_PROGRESS" status.');
+      }
+
+      if (complaint.status !== ComplaintStatus.ASSIGNED) {
+        throw new BadRequestError(
+          `Invalid status transition: Cannot change status from "${complaint.status}" to "IN_PROGRESS". Complaint must be in "ASSIGNED" status before starting work.`
+        );
+      }
+
+      // 5. Update complaint status
+      await tx.complaint.update({
+        where: { id: complaintId },
+        data: {
+          status: ComplaintStatus.IN_PROGRESS,
+        },
+      });
+
+      // 6. Create Status History entry
+      await tx.complaintStatusHistory.create({
+        data: {
+          complaint_id: complaintId,
+          status: ComplaintStatus.IN_PROGRESS,
+          changed_by: officer.id,
+          note: input.note || 'Work has started on this issue.',
+        },
+      });
+    });
+
+    return this.getDepartmentComplaintById(officer, complaintId);
+  }
+
+  /**
+   * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY, MUST BE ASSIGNED TO COMPLAINT)
+   */
+  public static async resolveComplaint(
+    officer: SafeUser,
+    complaintId: string,
+    input: ResolveComplaintInput
+  ): Promise<FormattedOfficerComplaintDetail> {
+    const { officerProfileId, departmentId } = this.getApprovedOfficerContext(officer);
+
+    // 1. Validate note and photo input
+    const note = (input.note || input.resolution_note || '').trim();
+    if (!note) {
+      throw new BadRequestError('Resolution note is required');
+    }
+
+    const photoPayload =
+      input.photo ||
+      input.photo_url ||
+      input.resolution_photo ||
+      input.resolution_photo_url;
+
+    if (!photoPayload || typeof photoPayload !== 'string' || !photoPayload.trim()) {
+      throw new BadRequestError('Resolution photo is required');
+    }
+
+    // 2. Photo Processing & Validation (Stores photo securely in uploads/resolutions)
+    let finalPhotoUrl: string;
+    if (
+      photoPayload.startsWith('data:image/') ||
+      (!photoPayload.startsWith('http://') &&
+        !photoPayload.startsWith('https://') &&
+        !photoPayload.startsWith('/uploads/'))
+    ) {
+      const stored = await saveBase64Image(photoPayload, 'resolutions');
+      finalPhotoUrl = stored.urlPath;
+    } else {
+      finalPhotoUrl = photoPayload;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // 3. Fetch complaint with current status, department, assignments, and resolution
+      const complaint = await tx.complaint.findUnique({
+        where: { id: complaintId },
+        include: {
+          assignments: {
+            orderBy: { assigned_at: 'desc' },
+          },
+          resolution: true,
+        },
+      });
+
+      if (!complaint) {
+        throw new NotFoundError(`Complaint with ID "${complaintId}" not found`);
+      }
+
+      // 4. Department boundary check
+      if (complaint.department_id !== departmentId) {
+        throw new ForbiddenError(
+          'Access denied: You do not have permission to modify complaints belonging to another department.'
+        );
+      }
+
+      // 5. Officer assignment check
+      const isAssigned = complaint.assignments.some(
+        (a) => a.officer_id === officerProfileId
+      );
+      if (!isAssigned) {
+        throw new ForbiddenError(
+          'Access denied: You must be assigned to this complaint to resolve it.'
+        );
+      }
+
+      // 6. Status transition validation: Allowed transition: IN_PROGRESS -> RESOLVED
+      if (complaint.status === ComplaintStatus.RESOLVED) {
+        throw new BadRequestError(
+          'Invalid status transition: Complaint is already "RESOLVED".'
+        );
+      }
+
+      if (complaint.status !== ComplaintStatus.IN_PROGRESS) {
+        throw new BadRequestError(
+          `Invalid status transition: Cannot resolve complaint from "${complaint.status}" status. Complaint must be in "IN_PROGRESS" status before it can be resolved.`
+        );
+      }
+
+      // 7. Update complaint status
+      await tx.complaint.update({
+        where: { id: complaintId },
+        data: {
+          status: ComplaintStatus.RESOLVED,
+        },
+      });
+
+      // 8. Create Resolution record
+      await tx.resolution.create({
+        data: {
+          complaint_id: complaintId,
+          officer_id: officerProfileId,
+          photo_url: finalPhotoUrl,
+          note: note,
+          resolved_at: new Date(),
+        },
+      });
+
+      // 9. Create Status History entry
+      await tx.complaintStatusHistory.create({
+        data: {
+          complaint_id: complaintId,
+          status: ComplaintStatus.RESOLVED,
+          changed_by: officer.id,
+          note: note,
         },
       });
     });
