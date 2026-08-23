@@ -4,6 +4,7 @@ import { ForbiddenError, NotFoundError } from '../../utils/apiError.js';
 import { saveBase64Image } from '../../utils/fileStorage.js';
 import { SafeUser } from '../auth/auth.service.js';
 import { DepartmentsService } from '../departments/departments.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { CreateComplaintInput, MyComplaintsQueryInput } from './complaints.schema.js';
 
 export interface FormattedComplaintSummary {
@@ -216,6 +217,16 @@ export class ComplaintsService {
           note: 'Complaint registered by citizen.',
         },
       });
+
+      // Dispatch notifications to citizen and department officers
+      await NotificationsService.notifyComplaintCreated(
+        complaint.id,
+        citizen.id,
+        complaint.department_id,
+        complaint.department.name,
+        complaint.title,
+        tx
+      );
 
       return complaint;
     });

@@ -4,6 +4,7 @@ import { BadRequestError, ForbiddenError, NotFoundError } from '../../utils/apiE
 import { saveBase64Image } from '../../utils/fileStorage.js';
 import { SafeUser } from '../auth/auth.service.js';
 import { generateComplaintNumber } from '../complaints/complaints.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import {
   AssignComplaintInput,
   OfficerComplaintsQueryInput,
@@ -168,23 +169,25 @@ export class OfficersService {
     const { officerProfileId, departmentId } = this.getApprovedOfficerContext(officer);
 
     await prisma.$transaction(async (tx) => {
-      // The status predicate is part of the UPDATE, making acceptance atomic.
-      // If two officers race, only one can change NEW -> ASSIGNED.
-      const updated = await tx.complaint.updateMany({
-        where: { id: complaintId, department_id: departmentId, status: ComplaintStatus.NEW },
-        data: { status: ComplaintStatus.ASSIGNED },
+      const complaintRecord = await tx.complaint.findUnique({
+        where: { id: complaintId },
+        select: { id: true, citizen_id: true, department_id: true, status: true },
       });
 
-      if (updated.count !== 1) {
-        const complaint = await tx.complaint.findUnique({ where: { id: complaintId }, select: { id: true, department_id: true, status: true } });
-        if (!complaint) throw new NotFoundError(`Complaint with ID "${complaintId}" not found`);
-        if (complaint.department_id !== departmentId) {
-          throw new ForbiddenError('Access denied: You cannot accept complaints belonging to another department.');
-        }
+      if (!complaintRecord) throw new NotFoundError(`Complaint with ID "${complaintId}" not found`);
+      if (complaintRecord.department_id !== departmentId) {
+        throw new ForbiddenError('Access denied: You cannot accept complaints belonging to another department.');
+      }
+      if (complaintRecord.status !== ComplaintStatus.NEW) {
         throw new BadRequestError(
-          `Complaint cannot be accepted because it is currently in "${complaint.status}" status (only "NEW" complaints can be accepted).`
+          `Complaint cannot be accepted because it is currently in "${complaintRecord.status}" status (only "NEW" complaints can be accepted).`
         );
       }
+
+      await tx.complaint.update({
+        where: { id: complaintId },
+        data: { status: ComplaintStatus.ASSIGNED },
+      });
 
       await tx.complaintAssignment.create({
         data: { complaint_id: complaintId, officer_id: officerProfileId, assigned_by: officer.id, assigned_at: new Date() },
@@ -198,6 +201,13 @@ export class OfficersService {
           note: input.note || `Complaint accepted by officer ${officer.name}.`,
         },
       });
+
+      // Notify citizen of complaint acceptance
+      await NotificationsService.notifyComplaintAssigned(
+        complaintId,
+        complaintRecord.citizen_id,
+        tx
+      );
     });
 
     return this.getDepartmentComplaintById(officer, complaintId);
@@ -280,6 +290,14 @@ export class OfficersService {
           note: input.note || 'Work has started on this issue.',
         },
       });
+
+      // 7. Notify citizen that work has started
+      await NotificationsService.notifyComplaintStatusChanged(
+        complaintId,
+        complaint.citizen_id,
+        ComplaintStatus.IN_PROGRESS,
+        tx
+      );
     });
 
     return this.getDepartmentComplaintById(officer, complaintId);
@@ -399,6 +417,13 @@ export class OfficersService {
           note: note,
         },
       });
+
+      // 10. Notify citizen of complaint resolution
+      await NotificationsService.notifyComplaintResolved(
+        complaintId,
+        complaint.citizen_id,
+        tx
+      );
     });
 
     return this.getDepartmentComplaintById(officer, complaintId);

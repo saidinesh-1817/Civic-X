@@ -3,6 +3,7 @@ import { authRouter } from '../../modules/auth/auth.route.js';
 import { complaintsRouter } from '../../modules/complaints/complaints.route.js';
 import { departmentsRouter, officesRouter } from '../../modules/departments/departments.route.js';
 import { officersRouter } from '../../modules/officers/officers.route.js';
+import { notificationsRouter } from '../../modules/notifications/notifications.route.js';
 import { healthRouter } from './health.route.js';
 import { testRouter } from './test.route.js';
 
@@ -27,6 +28,9 @@ v1Router.use('/complaints', complaintsRouter);
 v1Router.use('/officer', officersRouter);
 v1Router.use('/officers', officersRouter);
 
+// In-App Notifications Endpoints: /api/v1/notifications/*
+v1Router.use('/notifications', notificationsRouter);
+
 // Diagnostic & Verification Test Endpoints: /api/v1/test/*
 v1Router.use('/test', testRouter);
 
@@ -34,10 +38,8 @@ v1Router.use('/test', testRouter);
  * Future Module Mount Points:
  *
  * import { usersRouter } from '../../modules/users/users.route.js';
- * import { notificationsRouter } from '../../modules/notifications/notifications.route.js';
  * import { adminRouter } from '../../modules/administration/admin.route.js';
  *
  * v1Router.use('/users', usersRouter);
- * v1Router.use('/notifications', notificationsRouter);
  * v1Router.use('/admin', adminRouter);
  */

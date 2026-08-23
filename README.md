@@ -405,9 +405,145 @@ npm run test:workflow
 
 ---
 
+## 🔔 In-App Notification System (B10)
+
+### 1. Overview & Notification Types
+
+CivicSense provides automated, real-time in-app notifications to citizens and department officers upon key complaint lifecycle events.
+
+| Notification Type | Recipient | Trigger Event | Example Message |
+| :--- | :--- | :--- | :--- |
+| `COMPLAINT_SUBMITTED` | Citizen | Citizen creates complaint | *"Your complaint CIV-100001 has been submitted to Municipality / Sanitation."* |
+| `COMPLAINT_SUBMITTED` | Officers | Complaint created in department | *"A new complaint CIV-100001 has been submitted to Municipality / Sanitation: 'Garbage Dump Overflow'."* |
+| `COMPLAINT_ASSIGNED` | Citizen | Officer accepts/assigns complaint | *"Your complaint CIV-100001 has been accepted by the department."* |
+| `STATUS_CHANGED` | Citizen | Officer starts work (`IN_PROGRESS`) | *"Work has started on your complaint CIV-100001."* |
+| `COMPLAINT_RESOLVED` | Citizen | Officer resolves complaint | *"Your complaint CIV-100001 has been resolved."* |
+| `OFFICER_APPROVED` | Officer | Admin approves officer account | *"Your officer profile has been approved. You now have full access to department complaints."* |
+
+---
+
+### 2. Endpoints Specification
+
+| Method | Endpoint | Authorization | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/notifications` | Authenticated User | Lists paginated notifications for the authenticated user, ordered newest first. |
+| `GET` | `/api/v1/notifications/unread-count` | Authenticated User | Retrieves the total count of unread notifications for the user. |
+| `PATCH` | `/api/v1/notifications/:notificationId/read` | Authenticated User (Owner) | Marks a single notification as read (`is_read = true`). |
+| `PATCH` | `/api/v1/notifications/read-all` | Authenticated User | Marks all unread notifications for the authenticated user as read. |
+
+---
+
+### 3. API Examples
+
+#### 1. Retrieve Notifications (`GET /api/v1/notifications?page=1&limit=20`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Notifications retrieved successfully",
+  "data": {
+    "notifications": [
+      {
+        "id": "7b0a8801-4475-430c-80a5-fdf5b497bfa9",
+        "recipient_user_id": "user-cit-1111-1111-1111-111111111111",
+        "complaint_id": "c1111111-1111-1111-1111-111111111111",
+        "title": "Complaint Resolved",
+        "message": "Your complaint CIV-100001 has been resolved.",
+        "type": "COMPLAINT_RESOLVED",
+        "is_read": false,
+        "created_at": "2026-08-23T11:20:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 1,
+      "total_pages": 1
+    }
+  }
+}
+```
+
+#### 2. Get Unread Count (`GET /api/v1/notifications/unread-count`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Unread notifications count retrieved",
+  "data": {
+    "count": 4
+  }
+}
+```
+
+#### 3. Mark Single Notification as Read (`PATCH /api/v1/notifications/:notificationId/read`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Notification marked as read successfully",
+  "data": {
+    "id": "7b0a8801-4475-430c-80a5-fdf5b497bfa9",
+    "recipient_user_id": "user-cit-1111-1111-1111-111111111111",
+    "complaint_id": "c1111111-1111-1111-1111-111111111111",
+    "title": "Complaint Resolved",
+    "message": "Your complaint CIV-100001 has been resolved.",
+    "type": "COMPLAINT_RESOLVED",
+    "is_read": true,
+    "created_at": "2026-08-23T11:20:00.000Z"
+  }
+}
+```
+
+#### 4. Mark All as Read (`PATCH /api/v1/notifications/read-all`)
+
+##### Example Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "All notifications marked as read successfully",
+  "data": {
+    "updated_count": 4
+  }
+}
+```
+
+---
+
+## 🧪 Testing & Verification
+
+### Run the B10 In-App Notifications Test Suite
+```bash
+npm run test:notifications
+```
+
+| Test ID | Scenario | Expected Result |
+| :--- | :--- | :--- |
+| **Test A** | Citizen submits complaint | Citizen receives `COMPLAINT_SUBMITTED` notification |
+| **Test B** | Department officer receives complaint notification | Approved officer in relevant department receives alert |
+| **Test C** | Cross-department officer isolation | Officer from another department does NOT receive alert |
+| **Test D** | Officer accepts complaint | Citizen receives `COMPLAINT_ASSIGNED` update |
+| **Test E** | Officer starts work | Citizen receives `STATUS_CHANGED` update |
+| **Test F** | Officer resolves complaint | Citizen receives `COMPLAINT_RESOLVED` update |
+| **Test G** | User queries notifications | Strictly scoped to authenticated user ID |
+| **Test H** | User retrieves unread count | Returns accurate count of unread items |
+| **Test I** | User marks own notification as read | `200 OK` and `is_read = true` |
+| **Test J** | User attempts to mark another user's notification | `403 Forbidden` |
+| **Test K** | Mark all as read | Updates all items for current user without affecting others |
+| **Test L** | Idempotency & duplicate prevention | Duplicate event does not create redundant notification |
+| **Test M** | Officer onboarding approval alert | `OFFICER_APPROVED` notification dispatch works cleanly |
+
+---
+
 ### Run Full Test Suite Across All Modules
 
 ```bash
+# Run B10 In-App Notifications Tests
+npm run test:notifications
+
 # Run B9 Status Workflow & Resolution Tests
 npm run test:workflow
 
@@ -436,6 +572,7 @@ npm run test:db
 npm run lint
 npm run build
 ```
+
 
 
 ---
