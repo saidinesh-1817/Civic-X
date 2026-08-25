@@ -53,12 +53,10 @@ export const config: AppConfig = {
   nodeEnv,
   isProduction: nodeEnv === 'production',
   isDevelopment: nodeEnv === 'development',
-  isProduction: nodeEnv === 'production',
-  isDevelopment: nodeEnv === 'development',
   isTest: nodeEnv === 'test',
   port: parseInt(process.env.PORT || '5000', 10),
   apiPrefix: process.env.API_PREFIX || '/api',
-  // CORS_ORIGIN is the explicit multi-origin setting. Fall back to FRONTEND_URL for compatibility.
+  // Prefer the explicit multi-origin CORS setting, with FRONTEND_URL as a compatibility fallback.
   corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:5173'),
   databaseUrl: databaseUrl || 'postgresql://postgres:postgres@localhost:5432/civicsense?schema=public',
   // Development/test fallback is intentionally non-production only.
