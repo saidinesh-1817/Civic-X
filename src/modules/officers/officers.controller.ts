@@ -111,7 +111,7 @@ export class OfficersController {
 
   /**
    * POST /api/v1/officer/complaints/:complaintId/resolve
-   * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY, ASSIGNED OFFICER ONLY)
+   * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY)
    */
   public static resolveComplaint = async (
     req: Request,

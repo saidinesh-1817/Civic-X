@@ -448,7 +448,7 @@ export class OfficersService {
   }
 
   /**
-   * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY, MUST BE ASSIGNED TO COMPLAINT)
+   * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY)
    */
   public static async resolveComplaint(
     officer: SafeUser,
@@ -510,14 +510,27 @@ export class OfficersService {
         );
       }
 
-      // 5. Officer assignment check
+      // 5. Officer assignment check / Auto-assignment
       const isAssigned = complaint.assignments.some(
         (a) => a.officer_id === officerProfileId
       );
+
       if (!isAssigned) {
-        throw new ForbiddenError(
-          'Access denied: You must be assigned to this complaint to resolve it.'
-        );
+        if (complaint.assignments.length > 0) {
+          throw new ForbiddenError(
+            'Access denied: You must be assigned to this complaint to resolve it.'
+          );
+        }
+
+        // Auto-assign unassigned complaint to the handling department officer
+        await tx.complaintAssignment.create({
+          data: {
+            complaint_id: complaintId,
+            officer_id: officerProfileId,
+            assigned_by: officer.id,
+            assigned_at: new Date(),
+          },
+        });
       }
 
       // 6. Status transition validation: Allowed transition: IN_PROGRESS -> RESOLVED

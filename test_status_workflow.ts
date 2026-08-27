@@ -472,9 +472,20 @@ async function runStatusWorkflowTests() {
           (a) => a.officer_id === officerProfileId
         );
         if (!isAssigned) {
-          throw new ForbiddenError(
-            'Access denied: You must be assigned to this complaint to resolve it.'
-          );
+          if (complaint.assignments.length > 0) {
+            throw new ForbiddenError(
+              'Access denied: You must be assigned to this complaint to resolve it.'
+            );
+          }
+          complaint.assignments.push({
+            id: `asgn-${complaint.assignments.length + 1}`,
+            complaint_id: complaint.id,
+            officer_id: officerProfileId,
+            officer_name: officer.name,
+            designation: officer.officer_profile!.designation,
+            assigned_by: officer.id,
+            assigned_at: new Date(),
+          });
         }
 
         if (complaint.status === ComplaintStatus.RESOLVED) {

@@ -621,6 +621,122 @@ async function runScenarioTests() {
       `DB is_blocked: ${citizenDbUnblocked?.is_blocked}, GET HTTP: ${unblockedCitizenApiRes.statusCode}`
     );
 
+    // -------------------------------------------------------------------------
+    // TEST 15: Unassigned IN_PROGRESS complaint resolved by approved officer → auto-assigned and resolved
+    // -------------------------------------------------------------------------
+    const unassignedComplaintRes = await makeRequest(
+      port,
+      'POST',
+      '/api/v1/complaints',
+      {
+        title: 'Street Lamp Flickering in Alley 4',
+        description: 'Street light constantly turns on and off causing visibility hazard.',
+        department_id: electricalDept.id,
+      },
+      citizenToken
+    );
+    const unassignedComplaintId = unassignedComplaintRes.body?.data?.id;
+
+    // Transition status to IN_PROGRESS directly in DB to simulate an unassigned in-progress task
+    await prisma.complaint.update({
+      where: { id: unassignedComplaintId },
+      data: { status: ComplaintStatus.IN_PROGRESS },
+    });
+
+    const resolveUnassignedRes = await makeRequest(
+      port,
+      'POST',
+      `/api/v1/officer/complaints/${unassignedComplaintId}/resolve`,
+      {
+        note: 'Bulb replaced and wiring insulation secured.',
+        photo: sampleResolutionPhoto,
+      },
+      electricalOfficerToken
+    );
+
+    const complaintInDbAfterResolve = await prisma.complaint.findUnique({
+      where: { id: unassignedComplaintId },
+      include: { assignments: true, resolution: true },
+    });
+
+    const isAutoAssignedAndResolved =
+      resolveUnassignedRes.statusCode === 200 &&
+      resolveUnassignedRes.body?.data?.status === 'RESOLVED' &&
+      complaintInDbAfterResolve?.assignments.length === 1 &&
+      complaintInDbAfterResolve?.assignments[0].officer_id === electricalOfficerProfileId &&
+      complaintInDbAfterResolve?.resolution !== null;
+
+    recordTest(
+      15,
+      'Approved officer resolves unassigned complaint → automatically assigned and resolved successfully (200 OK)',
+      isAutoAssignedAndResolved,
+      `Status: ${resolveUnassignedRes.body?.data?.status}, Assigned Officer Profile: ${complaintInDbAfterResolve?.assignments[0]?.officer_id}`
+    );
+
+    // -------------------------------------------------------------------------
+    // TEST 16: Officer cannot resolve complaint assigned to ANOTHER officer in the same department
+    // -------------------------------------------------------------------------
+    // Register 2nd electrical officer
+    const electricalOfficer2Email = `officer_neha_${timestamp}@civicsense.test`;
+    const electricalOfficer2Password = 'NehaOfficer123!';
+    const officer2RegRes = await makeRequest(port, 'POST', '/api/v1/auth/register/officer', {
+      name: 'Officer Neha (Electrical 2)',
+      email: electricalOfficer2Email,
+      password: electricalOfficer2Password,
+      department_id: electricalDept.id,
+      designation: 'Assistant Electrical Engineer',
+    });
+    const officer2ProfileId = officer2RegRes.body?.data?.user?.officer_profile?.id;
+    await makeRequest(port, 'PATCH', `/api/v1/admin/officers/${officer2ProfileId}/approve`, undefined, adminToken);
+
+    const officer2LoginRes = await makeRequest(port, 'POST', '/api/v1/auth/login', {
+      email: electricalOfficer2Email,
+      password: electricalOfficer2Password,
+    });
+    const officer2Token = officer2LoginRes.body?.data?.token;
+
+    // Create complaint assigned to Officer 1 (Arjun) in IN_PROGRESS state
+    const compForArjunRes = await makeRequest(
+      port,
+      'POST',
+      '/api/v1/complaints',
+      {
+        title: 'Cable Fault at Main Substation',
+        description: 'Feeder cable insulation damaged.',
+        department_id: electricalDept.id,
+      },
+      citizenToken
+    );
+    const compForArjunId = compForArjunRes.body?.data?.id;
+
+    // Officer 1 accepts and starts work
+    await makeRequest(
+      port,
+      'PATCH',
+      `/api/v1/officer/complaints/${compForArjunId}/status`,
+      { status: 'IN_PROGRESS', note: 'Officer Arjun is handling this issue.' },
+      electricalOfficerToken
+    );
+
+    // Officer 2 (Neha) attempts to resolve Arjun's complaint
+    const officer2ResolveAttemptRes = await makeRequest(
+      port,
+      'POST',
+      `/api/v1/officer/complaints/${compForArjunId}/resolve`,
+      {
+        note: 'Officer Neha attempting unauthorized resolve on Arjun assignment.',
+        photo: sampleResolutionPhoto,
+      },
+      officer2Token
+    );
+
+    recordTest(
+      16,
+      'Officer attempting to resolve complaint assigned to another officer in the same department is rejected (403 Forbidden)',
+      officer2ResolveAttemptRes.statusCode === 403,
+      `HTTP status: ${officer2ResolveAttemptRes.statusCode}`
+    );
+
   } finally {
     server.close();
   }
