@@ -6,6 +6,7 @@ import {
 import { validate } from '../../middlewares/validate.middleware.js';
 import { OfficersController } from './officers.controller.js';
 import {
+  addProgressNoteSchema,
   assignComplaintSchema,
   complaintIdParamSchema,
   officerComplaintsQuerySchema,
@@ -46,13 +47,22 @@ officersRouter.post(
   OfficersController.assignComplaint
 );
 
-// PATCH /complaints/:complaintId/status: Start work on an assigned complaint (APPROVED OFFICER ONLY)
+// PATCH /complaints/:complaintId/status: Start work or update status on a complaint (APPROVED OFFICER ONLY)
 officersRouter.patch(
   '/complaints/:complaintId/status',
   requireAuthentication,
   requireApprovedOfficer,
   validate({ params: complaintIdParamSchema, body: updateComplaintStatusSchema }),
   OfficersController.updateComplaintStatus
+);
+
+// POST /complaints/:complaintId/progress: Add progress update note (APPROVED OFFICER ONLY)
+officersRouter.post(
+  '/complaints/:complaintId/progress',
+  requireAuthentication,
+  requireApprovedOfficer,
+  validate({ params: complaintIdParamSchema, body: addProgressNoteSchema }),
+  OfficersController.addProgressNote
 );
 
 // POST /complaints/:complaintId/resolve: Resolve an in-progress complaint with photo & note (APPROVED OFFICER ONLY)

@@ -76,7 +76,12 @@ export const resolveComplaintSchema = z
     { message: 'Resolution photo is required', path: ['photo'] }
   );
 
+export const addProgressNoteSchema = z.object({
+  note: z.string({ required_error: 'Progress note is required' }).trim().min(1, { message: 'Progress note cannot be empty' }).max(5000),
+});
+
 export type OfficerComplaintsQueryInput = z.infer<typeof officerComplaintsQuerySchema>;
 export type AssignComplaintInput = z.infer<typeof assignComplaintSchema>;
 export type UpdateComplaintStatusInput = z.infer<typeof updateComplaintStatusSchema>;
+export type AddProgressNoteInput = z.infer<typeof addProgressNoteSchema>;
 export type ResolveComplaintInput = z.infer<typeof resolveComplaintSchema>;

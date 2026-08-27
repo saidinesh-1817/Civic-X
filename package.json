@@ -28,7 +28,9 @@
     "test:admin": "tsx test_admin.ts",
     "test:advanced": "tsx test_advanced_features.ts",
     "test:e2e": "tsx test_e2e_integration.ts",
-    "test:fixes": "tsx test_final_deployment_fixes.ts"
+    "test:fixes": "tsx test_final_deployment_fixes.ts",
+    "test:officer-reg": "tsx test_officer_registration_flow.ts",
+    "test:scenario": "tsx test_deployment_scenario.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -35,6 +35,14 @@ authRouter.post(
   AuthController.registerOfficer
 );
 
+// Alias: POST /api/v1/auth/officer/register
+authRouter.post(
+  '/officer/register',
+  authRateLimiter,
+  validate({ body: officerRegisterSchema }),
+  AuthController.registerOfficer
+);
+
 // Universal Login: POST /api/v1/auth/login
 authRouter.post(
   '/login',

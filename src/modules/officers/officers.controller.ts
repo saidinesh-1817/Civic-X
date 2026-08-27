@@ -88,6 +88,28 @@ export class OfficersController {
   };
 
   /**
+   * POST /api/v1/officer/complaints/:complaintId/progress
+   * Add a progress note to an active complaint (APPROVED OFFICER ONLY)
+   */
+  public static addProgressNote = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const officer = getAuthenticatedUser(req);
+      const result = await OfficersService.addProgressNote(
+        officer,
+        req.params.complaintId,
+        req.body
+      );
+      ApiResponse.success(res, result, 'Progress note recorded successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
    * POST /api/v1/officer/complaints/:complaintId/resolve
    * Resolve complaint with evidence photo and note (APPROVED OFFICER ONLY, ASSIGNED OFFICER ONLY)
    */

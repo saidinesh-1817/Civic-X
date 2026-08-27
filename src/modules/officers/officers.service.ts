@@ -214,7 +214,7 @@ export class OfficersService {
   }
 
   /**
-   * Update complaint status to IN_PROGRESS (APPROVED OFFICER ONLY, MUST BE ASSIGNED TO COMPLAINT)
+   * Update complaint status to IN_PROGRESS or ASSIGNED (APPROVED OFFICER ONLY)
    */
   public static async updateComplaintStatus(
     officer: SafeUser,
@@ -224,9 +224,12 @@ export class OfficersService {
     const { officerProfileId, departmentId } = this.getApprovedOfficerContext(officer);
 
     // Validate that the requested status transition is allowed
-    if (input.status !== ComplaintStatus.IN_PROGRESS) {
+    if (
+      input.status !== ComplaintStatus.IN_PROGRESS &&
+      input.status !== ComplaintStatus.ASSIGNED
+    ) {
       throw new BadRequestError(
-        `Invalid status transition: Only transitioning to "IN_PROGRESS" is allowed via this endpoint.`
+        `Invalid status transition: Only transitioning to "ASSIGNED" or "IN_PROGRESS" is allowed via this endpoint.`
       );
     }
 
@@ -252,50 +255,191 @@ export class OfficersService {
         );
       }
 
-      // 3. Officer assignment check
+      // 3. Prevent modifications on already resolved complaints
+      if (complaint.status === ComplaintStatus.RESOLVED) {
+        throw new BadRequestError(
+          `Invalid status transition: Cannot change status from "RESOLVED" to "${input.status}". Complaint is already resolved.`
+        );
+      }
+
+      // 4. Officer assignment check / Auto-assignment
       const isAssigned = complaint.assignments.some(
         (a) => a.officer_id === officerProfileId
       );
+
       if (!isAssigned) {
-        throw new ForbiddenError(
-          'Access denied: You must be assigned to this complaint to update its status.'
-        );
+        if (complaint.assignments.length > 0) {
+          throw new ForbiddenError(
+            'Access denied: You must be assigned to this complaint to update its status.'
+          );
+        }
+
+        // Auto-assign unassigned complaint to the handling department officer
+        await tx.complaintAssignment.create({
+          data: {
+            complaint_id: complaintId,
+            officer_id: officerProfileId,
+            assigned_by: officer.id,
+            assigned_at: new Date(),
+          },
+        });
       }
 
-      // 4. Status transition validation: Allowed transition: ASSIGNED -> IN_PROGRESS
-      if (complaint.status === ComplaintStatus.IN_PROGRESS) {
-        throw new BadRequestError('Complaint is already in "IN_PROGRESS" status.');
+      // 5. Handle status transitions
+      if (complaint.status === input.status) {
+        if (input.note) {
+          await tx.complaintStatusHistory.create({
+            data: {
+              complaint_id: complaintId,
+              status: complaint.status,
+              changed_by: officer.id,
+              note: input.note,
+            },
+          });
+          return;
+        }
+        throw new BadRequestError(`Complaint is already in "${complaint.status}" status.`);
       }
 
-      if (complaint.status !== ComplaintStatus.ASSIGNED) {
+      if (
+        complaint.status === ComplaintStatus.IN_PROGRESS &&
+        input.status === ComplaintStatus.ASSIGNED
+      ) {
         throw new BadRequestError(
-          `Invalid status transition: Cannot change status from "${complaint.status}" to "IN_PROGRESS". Complaint must be in "ASSIGNED" status before starting work.`
+          'Invalid status transition: Cannot move complaint back to "ASSIGNED" from "IN_PROGRESS".'
         );
       }
 
-      // 5. Update complaint status
+      // 6. Update complaint status
       await tx.complaint.update({
         where: { id: complaintId },
         data: {
-          status: ComplaintStatus.IN_PROGRESS,
+          status: input.status,
         },
       });
 
-      // 6. Create Status History entry
+      // 7. Create Status History entry
       await tx.complaintStatusHistory.create({
         data: {
           complaint_id: complaintId,
-          status: ComplaintStatus.IN_PROGRESS,
+          status: input.status,
           changed_by: officer.id,
-          note: input.note || 'Work has started on this issue.',
+          note:
+            input.note ||
+            (input.status === ComplaintStatus.IN_PROGRESS
+              ? 'Work has started on this issue.'
+              : `Complaint accepted by officer ${officer.name}.`),
         },
       });
 
-      // 7. Notify citizen that work has started
+      // 8. Dispatch notifications to citizen
+      if (input.status === ComplaintStatus.ASSIGNED) {
+        await NotificationsService.notifyComplaintAssigned(
+          complaintId,
+          complaint.citizen_id,
+          tx
+        );
+      } else if (input.status === ComplaintStatus.IN_PROGRESS) {
+        await NotificationsService.notifyComplaintStatusChanged(
+          complaintId,
+          complaint.citizen_id,
+          ComplaintStatus.IN_PROGRESS,
+          tx
+        );
+      }
+    });
+
+    return this.getDepartmentComplaintById(officer, complaintId);
+  }
+
+  /**
+   * Add a progress update note (APPROVED OFFICER ONLY)
+   */
+  public static async addProgressNote(
+    officer: SafeUser,
+    complaintId: string,
+    input: { note: string }
+  ): Promise<FormattedOfficerComplaintDetail> {
+    const { officerProfileId, departmentId } = this.getApprovedOfficerContext(officer);
+
+    const note = (input.note || '').trim();
+    if (!note) {
+      throw new BadRequestError('Progress note is required');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const complaint = await tx.complaint.findUnique({
+        where: { id: complaintId },
+        include: {
+          assignments: {
+            orderBy: { assigned_at: 'desc' },
+          },
+        },
+      });
+
+      if (!complaint) {
+        throw new NotFoundError(`Complaint with ID "${complaintId}" not found`);
+      }
+
+      if (complaint.department_id !== departmentId) {
+        throw new ForbiddenError(
+          'Access denied: You do not have permission to modify complaints belonging to another department.'
+        );
+      }
+
+      if (complaint.status === ComplaintStatus.RESOLVED) {
+        throw new BadRequestError(
+          'Cannot add progress notes to an already resolved complaint.'
+        );
+      }
+
+      const isAssigned = complaint.assignments.some(
+        (a) => a.officer_id === officerProfileId
+      );
+
+      if (!isAssigned) {
+        if (complaint.assignments.length > 0) {
+          throw new ForbiddenError(
+            'Access denied: You must be assigned to this complaint to update its progress.'
+          );
+        }
+
+        // Auto-assign unassigned complaint to this officer
+        await tx.complaintAssignment.create({
+          data: {
+            complaint_id: complaintId,
+            officer_id: officerProfileId,
+            assigned_by: officer.id,
+            assigned_at: new Date(),
+          },
+        });
+
+        if (complaint.status === ComplaintStatus.NEW) {
+          await tx.complaint.update({
+            where: { id: complaintId },
+            data: { status: ComplaintStatus.IN_PROGRESS },
+          });
+        }
+      }
+
+      const currentStatus =
+        complaint.status === ComplaintStatus.NEW
+          ? ComplaintStatus.IN_PROGRESS
+          : complaint.status;
+
+      await tx.complaintStatusHistory.create({
+        data: {
+          complaint_id: complaintId,
+          status: currentStatus,
+          changed_by: officer.id,
+          note: note,
+        },
+      });
+
       await NotificationsService.notifyComplaintStatusChanged(
         complaintId,
         complaint.citizen_id,
-        ComplaintStatus.IN_PROGRESS,
+        currentStatus,
         tx
       );
     });

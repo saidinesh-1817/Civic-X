@@ -32,15 +32,7 @@ export const createComplaintSchema = z
       .optional()
       .nullable(),
     photo: z.string().optional().nullable(),
-    photo_url: z
-      .string()
-      .refine(
-        (value) =>
-          value.startsWith('data:image/') || value.startsWith('/uploads/'),
-        { message: 'photo_url must be a data image or a locally stored upload path' }
-      )
-      .optional()
-      .nullable(),
+    photo_url: z.string().optional().nullable(),
   })
   .refine(
     (data) => {
