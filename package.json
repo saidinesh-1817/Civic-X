@@ -27,7 +27,8 @@
     "test:notifications": "tsx test_notifications.ts",
     "test:admin": "tsx test_admin.ts",
     "test:advanced": "tsx test_advanced_features.ts",
-    "test:e2e": "tsx test_e2e_integration.ts"
+    "test:e2e": "tsx test_e2e_integration.ts",
+    "test:fixes": "tsx test_final_deployment_fixes.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

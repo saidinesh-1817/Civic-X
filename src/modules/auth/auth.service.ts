@@ -44,6 +44,7 @@ export interface SafeUser {
   email: string;
   phone: string | null;
   role: Role;
+  is_blocked: boolean;
   created_at: Date;
   updated_at: Date;
   officer_profile?: SafeOfficerProfile | null;
@@ -65,6 +66,7 @@ export class AuthService {
       email: user.email,
       phone: user.phone ?? null,
       role: user.role,
+      is_blocked: user.is_blocked ?? false,
       created_at: user.created_at,
       updated_at: user.updated_at,
     };
@@ -235,6 +237,12 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(input.password, user.password_hash);
     if (!isPasswordValid) {
       throw new UnauthorizedError('Invalid email or password');
+    }
+
+    if (user.is_blocked) {
+      throw new ForbiddenError(
+        'Your account has been blocked by administration. Access denied.'
+      );
     }
 
     // Role-specific verification checks for Officers

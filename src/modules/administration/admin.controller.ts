@@ -115,6 +115,127 @@ export class AdminController {
   };
 
   /**
+   * GET /api/v1/admin/complaints
+   * List all civic complaints across all departments with filters & pagination
+   */
+  public static listComplaints = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.listComplaints(req.query as any);
+      ApiResponse.success(res, result, 'Master complaints list retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/v1/admin/users
+   * List all registered user accounts with filtering & pagination
+   */
+  public static listUsers = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.listUsers(req.query as any);
+      ApiResponse.success(res, result, 'Users list retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/v1/admin/users/:userId
+   * Retrieve single user details
+   */
+  public static getUserById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.getUserById(req.params.userId);
+      ApiResponse.success(res, result, 'User details retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * PATCH /api/v1/admin/users/:userId/block
+   * Block a citizen or user account
+   */
+  public static blockUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const adminUserId = req.user!.id;
+      const result = await AdminService.blockUser(adminUserId, req.params.userId);
+      ApiResponse.success(res, result, 'User account blocked successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * PATCH /api/v1/admin/users/:userId/unblock
+   * Unblock a citizen or user account
+   */
+  public static unblockUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.unblockUser(req.params.userId);
+      ApiResponse.success(res, result, 'User account unblocked successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * PATCH /api/v1/admin/officers/:officerId/block
+   * Block an officer account
+   */
+  public static blockOfficer = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const adminUserId = req.user!.id;
+      const result = await AdminService.blockOfficer(adminUserId, req.params.officerId);
+      ApiResponse.success(res, result, 'Officer account blocked successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * PATCH /api/v1/admin/officers/:officerId/unblock
+   * Unblock an officer account
+   */
+  public static unblockOfficer = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await AdminService.unblockOfficer(req.params.officerId);
+      ApiResponse.success(res, result, 'Officer account unblocked successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
    * GET /api/v1/admin/complaints/summary
    * Summary overview of complaint metrics for administration
    */

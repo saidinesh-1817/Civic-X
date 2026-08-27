@@ -74,6 +74,20 @@ export interface FormattedComplaintDetail {
   };
   created_at: Date;
   updated_at: Date;
+  assignments?: Array<{
+    id: string;
+    officer_id: string;
+    officer_name: string;
+    designation: string;
+    assigned_at: Date;
+  }>;
+  assigned_officer?: {
+    id: string;
+    officer_id: string;
+    officer_name: string;
+    designation: string;
+    assigned_at: Date;
+  } | null;
   status_history: Array<{
     id: string;
     status: ComplaintStatus;
@@ -86,6 +100,11 @@ export interface FormattedComplaintDetail {
     note: string;
     resolved_at: Date;
     created_at: Date;
+    officer?: {
+      id: string;
+      designation: string;
+      name: string;
+    } | null;
   } | null;
 }
 
@@ -421,6 +440,29 @@ export class ComplaintsService {
             email: true,
           },
         },
+        assignments: {
+          select: {
+            id: true,
+            officer_id: true,
+            assigned_at: true,
+            officer: {
+              select: {
+                id: true,
+                designation: true,
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: {
+            assigned_at: 'desc',
+          },
+        },
         status_history: {
           select: {
             id: true,
@@ -439,6 +481,19 @@ export class ComplaintsService {
             note: true,
             resolved_at: true,
             created_at: true,
+            officer: {
+              select: {
+                id: true,
+                designation: true,
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -448,11 +503,24 @@ export class ComplaintsService {
       throw new NotFoundError(`Complaint with ID "${complaintId}" not found`);
     }
 
-    // Ownership Enforcement: Citizens can ONLY view complaints belonging to their account
+    // Role-based Access Enforcement:
+    // - CITIZENS can ONLY view complaints they filed
     if (user.role === Role.CITIZEN && complaint.citizen_id !== user.id) {
       throw new ForbiddenError(
         'Access denied: You do not have permission to view this complaint.'
       );
+    }
+
+    // - OFFICERS can ONLY view complaints belonging to their assigned department
+    if (user.role === Role.OFFICER) {
+      if (!user.officer_profile || user.officer_profile.verification_status !== 'APPROVED') {
+        throw new ForbiddenError('Officer account must be approved before viewing complaints.');
+      }
+      if (user.officer_profile.department_id !== complaint.department_id) {
+        throw new ForbiddenError(
+          'Access denied: You do not have permission to view complaints belonging to another department.'
+        );
+      }
     }
 
     const slaInfo = ComplaintSlaService.calculateSlaStatus(
@@ -461,6 +529,14 @@ export class ComplaintsService {
       complaint.priority,
       complaint.resolution?.resolved_at
     );
+
+    const assignmentsList = complaint.assignments.map((a) => ({
+      id: a.id,
+      officer_id: a.officer_id,
+      officer_name: a.officer.user.name,
+      designation: a.officer.designation,
+      assigned_at: a.assigned_at,
+    }));
 
     return {
       id: complaint.id,
@@ -492,6 +568,8 @@ export class ComplaintsService {
         name: complaint.citizen.name,
         email: complaint.citizen.email,
       },
+      assignments: assignmentsList,
+      assigned_officer: assignmentsList[0] || null,
       created_at: complaint.created_at,
       updated_at: complaint.updated_at,
       status_history: complaint.status_history.map((h) => ({
@@ -507,6 +585,13 @@ export class ComplaintsService {
             note: complaint.resolution.note,
             resolved_at: complaint.resolution.resolved_at,
             created_at: complaint.resolution.created_at,
+            officer: complaint.resolution.officer
+              ? {
+                  id: complaint.resolution.officer.id,
+                  designation: complaint.resolution.officer.designation,
+                  name: complaint.resolution.officer.user.name,
+                }
+              : null,
           }
         : null,
     };

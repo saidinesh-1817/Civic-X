@@ -41,6 +41,14 @@ export const requireRoles = (...allowedRoles: Role[]) => {
       return next(new UnauthorizedError('Authentication required'));
     }
 
+    if (req.user.is_blocked) {
+      return next(
+        new ForbiddenError(
+          'Your account has been blocked by administration. Access to the platform is suspended.'
+        )
+      );
+    }
+
     if (!allowedRoles.includes(req.user.role)) {
       return next(
         new ForbiddenError(

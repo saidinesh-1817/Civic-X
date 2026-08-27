@@ -54,6 +54,13 @@ export const authenticate = async (
       throw new UnauthorizedError('User account associated with this token no longer exists');
     }
 
+    // Disallow blocked users from any authenticated operations
+    if (user.is_blocked) {
+      throw new ForbiddenError(
+        'Your account has been blocked by administration. Access to the platform is suspended.'
+      );
+    }
+
     // Disallow pending/rejected officers from authenticated operations
     if (user.role === Role.OFFICER) {
       if (!user.officer_profile) {
@@ -82,6 +89,14 @@ export const requireRole = (...allowedRoles: Role[]) => {
   return (req: Request, _res: Response, next: NextFunction): void => {
     if (!req.user) {
       return next(new UnauthorizedError('Authentication required'));
+    }
+
+    if (req.user.is_blocked) {
+      return next(
+        new ForbiddenError(
+          'Your account has been blocked by administration. Access to the platform is suspended.'
+        )
+      );
     }
 
     if (!allowedRoles.includes(req.user.role)) {
